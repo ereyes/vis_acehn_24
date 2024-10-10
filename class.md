@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     bun_top((Top Bun))
     lettuce[Lettuce]
@@ -11,3 +12,4 @@ graph TD
     cheese --> patty
     patty --> tomato
     tomato --> bun_bottom
+```
