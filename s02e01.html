@@ -1,0 +1,259 @@
+<!-- 
+ 
+Code fait à l'aide de ChatGPT 4o dans le cadre du cours Datavis.
+M2 ACEHN, Univ. Paris 8
+
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag and Drop Multiple Photos with EXIF Info and Map Pins</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .top-section {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+        }
+        .drop-zone {
+            width: 45%;
+            height: 300px;
+            border: 2px dashed #ccc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #aaa;
+        }
+        #map {
+            width: 45%;
+            height: 300px;
+        }
+        .exif-table {
+            margin-top: 20px;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .exif-table th, .exif-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .exif-table th {
+            background-color: #f2f2f2;
+        }
+        .image-gallery {
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            width: 100%;
+        }
+        .image-item {
+            margin-right: 10px;
+            margin-bottom: 20px;
+        }
+        .image-item img {
+            max-width: 300px;
+            height: auto;
+        }
+    </style>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Top section: Drop Zone and Map -->
+        <div class="top-section">
+            <div class="drop-zone" id="drop-zone">
+                Drag and drop your photos here
+            </div>
+
+            <div id="map"></div>
+        </div>
+
+        <!-- EXIF Data Table -->
+        <table class="exif-table" id="exif-table">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Width</th>
+                    <th>Height</th>
+                    <th>Latitude</th>
+                    <th>Longitude</th>
+                    <th>Altitude</th>
+                    <th>GPS Image Direction</th>
+                    <th>Camera Make</th>
+                    <th>Camera Model</th>
+                    <th>Date Taken</th>
+                    <th>Time Taken</th>
+                </tr>
+            </thead>
+            <tbody id="exif-data-body">
+            </tbody>
+        </table>
+
+        <!-- Image Gallery -->
+        <div class="image-gallery" id="image-container"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const exifDataBody = document.getElementById('exif-data-body');
+        const imageContainer = document.getElementById('image-container');
+        let map = L.map('map').setView([0, 0], 2); // Initialize the map at a neutral point
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZone.style.borderColor = '#00aaff';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#ccc';
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropZone.style.borderColor = '#ccc';
+
+            const files = event.dataTransfer.files;
+            handleFiles(files);
+        });
+
+        function handleFiles(files) {
+            for (let file of files) {
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+
+                    reader.onload = function(e) {
+                        const imgSrc = e.target.result;
+                        const safeFileName = sanitizeFilename(file.name);
+                        const img = new Image();
+                        img.src = imgSrc;
+
+                        img.onload = function() {
+                            const width = img.width;
+                            const height = img.height;
+
+                            // Create a new image element and add it to the image gallery
+                            const imageItem = document.createElement('div');
+                            imageItem.classList.add('image-item');
+                            const imgElement = document.createElement('img');
+                            imgElement.src = imgSrc;
+                            imageItem.appendChild(imgElement);
+                            imageContainer.appendChild(imageItem);
+
+                            const tableRow = document.createElement('tr');
+                            tableRow.innerHTML = `
+                                <td>${file.name}</td>
+                                <td>${width}</td>
+                                <td>${height}</td>
+                                <td id="latitude-${safeFileName}">N/A</td>
+                                <td id="longitude-${safeFileName}">N/A</td>
+                                <td id="altitude-${safeFileName}">N/A</td>
+                                <td id="gps-direction-${safeFileName}">N/A</td>
+                                <td id="camera-make-${safeFileName}">N/A</td>
+                                <td id="camera-model-${safeFileName}">N/A</td>
+                                <td id="date-taken-${safeFileName}">N/A</td>
+                                <td id="time-taken-${safeFileName}">N/A</td>
+                            `;
+                            exifDataBody.appendChild(tableRow);
+
+                            // Read EXIF data
+                            EXIF.getData(file, function() {
+                                const latitude = EXIF.getTag(this, "GPSLatitude");
+                                const longitude = EXIF.getTag(this, "GPSLongitude");
+                                const altitude = EXIF.getTag(this, "GPSAltitude");
+                                const gpsDirection = EXIF.getTag(this, "GPSImgDirection");
+                                const cameraMake = EXIF.getTag(this, "Make");
+                                const cameraModel = EXIF.getTag(this, "Model");
+                                const dateTaken = EXIF.getTag(this, "DateTime");
+
+                                const latElement = document.getElementById(`latitude-${safeFileName}`);
+                                const lonElement = document.getElementById(`longitude-${safeFileName}`);
+                                const altElement = document.getElementById(`altitude-${safeFileName}`);
+                                const directionElement = document.getElementById(`gps-direction-${safeFileName}`);
+                                const makeElement = document.getElementById(`camera-make-${safeFileName}`);
+                                const modelElement = document.getElementById(`camera-model-${safeFileName}`);
+                                const dateElement = document.getElementById(`date-taken-${safeFileName}`);
+                                const timeElement = document.getElementById(`time-taken-${safeFileName}`);
+
+                                if (latitude && longitude) {
+                                    const lat = convertToDegrees(latitude);
+                                    const lon = convertToDegrees(longitude);
+
+                                    latElement.textContent = lat.toFixed(6);
+                                    lonElement.textContent = lon.toFixed(6);
+                                    directionElement.textContent = gpsDirection || 'N/A';
+
+                                    // Add a marker for each image on the map
+                                    const marker = L.marker([lat, lon]).addTo(map);
+                                    marker.bindPopup(`<img src="${imgSrc}" width="100px">`);
+
+                                    // Center the map around the image's location
+                                    map.setView([lat, lon], 10);
+                                } else {
+                                    latElement.textContent = 'N/A';
+                                    lonElement.textContent = 'N/A';
+                                    directionElement.textContent = 'N/A';
+                                }
+
+                                // Display altitude if available
+                                altElement.textContent = altitude ? `${altitude.toFixed(2)} meters` : 'N/A';
+
+                                // Display other EXIF data
+                                makeElement.textContent = cameraMake || 'N/A';
+                                modelElement.textContent = cameraModel || 'N/A';
+
+                                if (dateTaken) {
+                                    const [date, time] = splitDateTime(dateTaken);
+                                    dateElement.textContent = date || 'N/A';
+                                    timeElement.textContent = time || 'N/A';
+                                } else {
+                                    dateElement.textContent = 'N/A';
+                                    timeElement.textContent = 'N/A';
+                                }
+                            });
+                        };
+                    };
+
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+
+        function convertToDegrees(coord) {
+            return coord[0] + (coord[1] / 60) + (coord[2] / 3600);
+        }
+
+        // Split DateTime into date and time
+        function splitDateTime(dateTime) {
+            const [date, time] = dateTime.split(' ');
+            return [date.replace(/:/g, '-'), time]; // Format the date
+        }
+
+        // Sanitize file names to be safe for use in HTML IDs
+        function sanitizeFilename(filename) {
+            return filename.replace(/[^a-zA-Z0-9_-]/g, '');
+        }
+    </script>
+
+</body>
+</html>
