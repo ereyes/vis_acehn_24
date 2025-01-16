@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Images in Space</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+</head>
+<body>
+  <div id="dropZone" style="border: 2px dashed #ccc; padding: 20px; text-align: center;">
+    Drop image files here to add them to the map.
+  </div>
+  <button id="resetButton" style="display: block; margin: 20px auto; padding: 10px 20px; font-size: 16px;">Reset View</button>
+  <script>
+    let points = [
+      { lat: 48.908886, lon: 2.364886, alt: 41.44, dir: 280.8744813, img: 'IMG_9655.jpg' },
+      // Existing points...
+    ];
+    let images = [];
+    let planeWidth = 50;
+    let planeHeight = (planeWidth * 4032) / 2268;
+    let cam; // Reference to the camera
+
+    function preload() {
+      for (let i = 0; i < points.length; i++) {
+        images[i] = loadImage('parcours/' + points[i].img);
+      }
+    }
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      cam = createCamera(); // Initialize the camera
+      setupDropZone();
+      setupResetButton();
+    }
+
+    function setupDropZone() {
+      const dropZone = document.getElementById('dropZone');
+      dropZone.addEventListener('dragover', (e) => e.preventDefault());
+      dropZone.addEventListener('drop', handleDrop);
+    }
+
+    function setupResetButton() {
+      const resetButton = document.getElementById('resetButton');
+      resetButton.addEventListener('click', resetView);
+    }
+
+    function handleDrop(event) {
+      event.preventDefault();
+      const files = event.dataTransfer.files;
+      for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          const img = new Image();
+          img.src = e.target.result;
+          img.onload = () => {
+            EXIF.getData(img, function () {
+              const lat = EXIF.getTag(this, 'GPSLatitude');
+              const lon = EXIF.getTag(this, 'GPSLongitude');
+              const alt = EXIF.getTag(this, 'GPSAltitude') || 0;
+              const dir = EXIF.getTag(this, 'GPSImgDirection') || 0;
+              const imgData = {
+                lat: lat ? convertToDecimal(lat) : 0,
+                lon: lon ? convertToDecimal(lon) : 0,
+                alt: alt,
+                dir: dir,
+                img: file.name,
+              };
+              points.push(imgData);
+              images.push(loadImage(e.target.result)); // Add to images array
+            });
+          };
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function convertToDecimal(coord) {
+      const [degrees, minutes, seconds] = coord;
+      return degrees + minutes / 60 + seconds / 3600;
+    }
+
+    function resetView() {
+      // Reset the camera position and orientation
+      cam.setPosition(0, 0, (height / 2) / tan(PI / 6)); // Default position
+      cam.lookAt(0, 0, 0); // Center the camera on origin
+    }
+
+    function draw() {
+      background(230, 248, 250); // Set background color
+      orbitControl(); // Allow zoom and drag
+      noStroke();
+      fill(150, 150, 150);
+
+      // Calculate the bounds of the plane to cover all points
+      const planeSize = calculatePlaneSize();
+
+      push();
+      rotateX(HALF_PI);
+      translate(0, 200, 0);
+      plane(planeSize, planeSize); // Larger plane
+      pop();
+
+      stroke(0);
+      strokeWeight(1);
+      for (let i = 0; i < points.length; i++) {
+        let x = (points[i].lat - 48.9) * 25000;
+        let y = -points[i].alt * 5;
+        let z = (points[i].lon - 2.36) * 25000;
+        let rotationAngle = radians(points[i].dir);
+
+        push();
+        translate(x, y, z);
+        rotateY(rotationAngle);
+        if (images[i]) texture(images[i]);
+        plane(planeWidth, planeHeight);
+        pop();
+
+        if (i < points.length - 1) {
+          let nextX = (points[i + 1].lat - 48.9) * 25000;
+          let nextY = -points[i + 1].alt * 5;
+          let nextZ = (points[i + 1].lon - 2.36) * 25000;
+          line(x, y, z, nextX, nextY, nextZ);
+        }
+      }
+    }
+
+    function calculatePlaneSize() {
+      let maxLatDiff = 0;
+      let maxLonDiff = 0;
+
+      points.forEach((point) => {
+        const latDiff = Math.abs(point.lat - 48.9) * 25000;
+        const lonDiff = Math.abs(point.lon - 2.36) * 25000;
+        if (latDiff > maxLatDiff) maxLatDiff = latDiff;
+        if (lonDiff > maxLonDiff) maxLonDiff = lonDiff;
+      });
+
+      // Add a buffer to ensure all points are well covered
+      return Math.max(maxLatDiff, maxLonDiff) * 2 + 2000;
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+  </script>
+</body>
+</html>
