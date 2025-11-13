@@ -1,0 +1,384 @@
+<!-- 
+Deux boutons : Prendre une photo (caméra) + Sélectionner des fichiers (local)
++ EXIF + Carte + Export CSV
+Cours Datavis — M2 ACEHN, Univ. Paris 8
+-->
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Photos + EXIF + Carte (mobile, 2 boutons)</title>
+
+  <style>
+    :root{
+      --bg:#ffffff; --text:#111827; --muted:#6b7280;
+      --primary:#2563eb; --border:#d1d5db; --surface:#f8fafc;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text); background:var(--bg); line-height:1.5;
+    }
+    .container{ max-width:1200px; margin:0 auto; padding:16px; }
+
+    .controls{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+    .btn{
+      appearance:none; border:1px solid var(--border); background:var(--surface);
+      padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600;
+    }
+    .btn.primary{ background:var(--primary); color:#fff; border-color:transparent; }
+    .btn:disabled{ opacity:.55; cursor:not-allowed; }
+
+    .top-section{ display:flex; gap:12px; align-items:stretch; }
+    .drop-zone{
+      flex:1 1 0; min-height:260px; border:2px dashed var(--border);
+      border-radius:12px; display:flex; align-items:center; justify-content:center;
+      text-align:center; color:var(--muted); padding:12px; cursor:pointer; background:#fcfcfd;
+    }
+    .drop-zone.dragover{ border-color:var(--primary); background:#eff6ff; color:#1e3a8a; }
+    #map{ flex:1 1 0; min-height:260px; border-radius:12px; overflow:hidden; }
+
+    .table-wrap{ margin-top:16px; width:100%; overflow-x:auto; }
+    .exif-table{ width:100%; border-collapse:collapse; min-width:720px; }
+    .exif-table th, .exif-table td{ border:1px solid #eee; padding:8px 10px; text-align:left; }
+    .exif-table th{ background:#f3f4f6; }
+
+    .image-gallery{ margin-top:16px; display:flex; flex-wrap:wrap; gap:12px; }
+    .image-item img{
+      max-width:320px; height:auto; display:block; border-radius:8px; border:1px solid #eee;
+    }
+
+    @media (max-width: 900px){
+      .top-section{ flex-direction:column; }
+      .drop-zone, #map{ width:100%; min-height:40vh; }
+      .image-item img{ max-width:100%; }
+    }
+
+    @media (prefers-color-scheme: dark){
+      :root{ --bg:#0b0f14; --text:#e5e7eb; --muted:#94a3b8; --surface:#0f172a; --border:#334155; --primary:#3b82f6; }
+      .exif-table th{ background:#0f172a; }
+      .exif-table td, .exif-table th{ border-color:#1f2937; }
+      .drop-zone{ background:#0f172a; }
+      .btn{ background:#111827; color:#e5e7eb; border-color:#374151; }
+    }
+  </style>
+
+  <!-- Leaflet + EXIF.js -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <!-- Contrôles -->
+    <div class="controls">
+      <!-- Bouton 1 : sélectionner depuis l’appareil (pas de capture) -->
+      <label for="file-input-picker" class="btn primary" title="Sélectionner des fichiers locaux">Sélectionner des fichiers</label>
+      <input
+        id="file-input-picker"
+        type="file"
+        accept="image/*"
+        multiple
+        style="display:none"
+        aria-label="Sélectionner des images depuis le stockage local"
+      />
+
+      <!-- Bouton 2 : ouvrir la caméra -->
+      <label for="file-input-camera" class="btn" title="Prendre une photo">Prendre une photo</label>
+      <input
+        id="file-input-camera"
+        type="file"
+        accept="image/*"
+        capture="environment" 
+        style="display:none"
+        aria-label="Prendre une photo avec la caméra"
+      />
+
+      <button id="download-csv" class="btn" disabled>Télécharger CSV</button>
+    </div>
+
+    <!-- Haut de page : drop zone + carte -->
+    <div class="top-section">
+      <div class="drop-zone" id="drop-zone" role="button" tabindex="0"
+           aria-label="Déposez des photos ici ou touchez pour sélectionner depuis l’appareil">
+        Déposez vos photos ici<br>(ou touchez pour sélectionner depuis l’appareil)
+      </div>
+      <div id="map" aria-label="Carte des positions GPS"></div>
+    </div>
+
+    <!-- Table EXIF -->
+    <div class="table-wrap">
+      <table class="exif-table" id="exif-table">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Width</th>
+            <th>Height</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Altitude</th>
+            <th>GPS Image Direction</th>
+            <th>Camera Make</th>
+            <th>Camera Model</th>
+            <th>Date Taken</th>
+            <th>Time Taken</th>
+          </tr>
+        </thead>
+        <tbody id="exif-data-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Galerie -->
+    <div class="image-gallery" id="image-container"></div>
+  </div>
+
+  <script>
+    // Références DOM
+    const dropZone = document.getElementById('drop-zone');
+    const pickerInput = document.getElementById('file-input-picker');
+    const cameraInput = document.getElementById('file-input-camera');
+    const downloadBtn = document.getElementById('download-csv');
+    const exifDataBody = document.getElementById('exif-data-body');
+    const imageContainer = document.getElementById('image-container');
+
+    // Carte Leaflet
+    const map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    const markersGroup = L.featureGroup().addTo(map);
+
+    // Données pour CSV
+    const dataSet = [];
+    let rowCounter = 0;
+
+    // --- Dropzone & interactions
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+    });
+
+    // IMPORTANT : clic/entrée/espace sur la zone -> ouvre le sélecteur de fichiers (pas la caméra)
+    dropZone.addEventListener('click', () => pickerInput.click());
+    dropZone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') pickerInput.click();
+    });
+
+    // Sélecteur de fichiers locaux
+    pickerInput.addEventListener('change', () => handleFiles(pickerInput.files));
+    // Caméra (1 photo à la fois ; ré-appuyer pour une autre)
+    cameraInput.addEventListener('change', () => handleFiles(cameraInput.files));
+
+    downloadBtn.addEventListener('click', exportCSV);
+
+    // --- Traitement des fichiers
+    function handleFiles(fileList) {
+      const files = Array.from(fileList || []);
+      files.forEach((file) => {
+        if (!file.type || !file.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataURL = e.target.result;
+
+          const img = new Image();
+          img.onload = function() {
+            const width = img.naturalWidth;
+            const height = img.naturalHeight;
+
+            // ID unique pour lier cellules -> éviter collisions
+            const idSuffix = (++rowCounter) + '-' + Math.random().toString(36).slice(2,7);
+            const safeId = sanitizeFilename(file.name) + '-' + idSuffix;
+
+            // Aperçu
+            const imageItem = document.createElement('div');
+            imageItem.className = 'image-item';
+            const imgEl = document.createElement('img');
+            imgEl.src = dataURL;
+            imgEl.alt = file.name;
+            imgEl.loading = 'lazy';
+            imageItem.appendChild(imgEl);
+            imageContainer.appendChild(imageItem);
+
+            // Ligne du tableau (placeholder)
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${escapeHTML(file.name)}</td>
+              <td>${width}</td>
+              <td>${height}</td>
+              <td id="latitude-${safeId}">N/A</td>
+              <td id="longitude-${safeId}">N/A</td>
+              <td id="altitude-${safeId}">N/A</td>
+              <td id="gps-direction-${safeId}">N/A</td>
+              <td id="camera-make-${safeId}">N/A</td>
+              <td id="camera-model-${safeId}">N/A</td>
+              <td id="date-taken-${safeId}">N/A</td>
+              <td id="time-taken-${safeId}">N/A</td>
+            `;
+            exifDataBody.appendChild(tr);
+
+            // Lire EXIF
+            EXIF.getData(file, function() {
+              // GPS
+              let lat = dmsToDecimal(EXIF.getTag(this, 'GPSLatitude'));
+              const latRef = EXIF.getTag(this, 'GPSLatitudeRef');
+              let lon = dmsToDecimal(EXIF.getTag(this, 'GPSLongitude'));
+              const lonRef = EXIF.getTag(this, 'GPSLongitudeRef');
+              let alt = toNumber(EXIF.getTag(this, 'GPSAltitude'));
+              const altRef = EXIF.getTag(this, 'GPSAltitudeRef'); // 0=au-dessus, 1=au-dessous du niveau de la mer
+
+              // Autres métadonnées
+              const direction = toNumber(EXIF.getTag(this, 'GPSImgDirection'));
+              const make = EXIF.getTag(this, 'Make') || '';
+              const model = EXIF.getTag(this, 'Model') || '';
+              const dtOriginal = EXIF.getTag(this, 'DateTimeOriginal')
+                                  || EXIF.getTag(this, 'DateTimeDigitized')
+                                  || EXIF.getTag(this, 'DateTime');
+              let date = '', time = '';
+              if (dtOriginal) [date, time] = splitDateTime(dtOriginal);
+
+              // Appliquer signes N/S/E/W et altitude ref
+              if (typeof lat === 'number' && !isNaN(lat) && latRef && String(latRef).toUpperCase() === 'S') lat = -lat;
+              if (typeof lon === 'number' && !isNaN(lon) && lonRef && String(lonRef).toUpperCase() === 'W') lon = -lon;
+              if (typeof alt === 'number' && !isNaN(alt) && (altRef === 1 || String(altRef) === '1')) alt = -alt;
+
+              // MAJ tableau
+              setCell(`latitude-${safeId}`,  isFinite(lat) ? lat.toFixed(6) : 'N/A');
+              setCell(`longitude-${safeId}`, isFinite(lon) ? lon.toFixed(6) : 'N/A');
+              setCell(`altitude-${safeId}`,  isFinite(alt) ? `${alt.toFixed(2)} m` : 'N/A');
+              setCell(`gps-direction-${safeId}`, isFinite(direction) ? `${direction.toFixed(2)}°` : 'N/A');
+              setCell(`camera-make-${safeId}`, make || 'N/A');
+              setCell(`camera-model-${safeId}`, model || 'N/A');
+              setCell(`date-taken-${safeId}`, date || 'N/A');
+              setCell(`time-taken-${safeId}`, time || 'N/A');
+
+              // Marqueur sur la carte
+              if (isFinite(lat) && isFinite(lon)) {
+                const marker = L.marker([lat, lon]).addTo(markersGroup);
+                marker.bindPopup(`
+                  <strong>${escapeHTML(file.name)}</strong><br>
+                  <img src="${dataURL}" width="120" style="display:block;margin-top:6px;border-radius:6px;" loading="lazy">
+                `);
+                if (markersGroup.getLayers().length === 1) {
+                  map.setView([lat, lon], 12);
+                } else {
+                  map.fitBounds(markersGroup.getBounds(), { padding: [24, 24] });
+                }
+              }
+
+              // Pour l'export CSV
+              dataSet.push({
+                'Filename': file.name,
+                'Width': width,
+                'Height': height,
+                'Latitude':  isFinite(lat) ? lat : '',
+                'Longitude': isFinite(lon) ? lon : '',
+                'Altitude':  isFinite(alt) ? alt : '',
+                'GPS Image Direction': isFinite(direction) ? direction : '',
+                'Camera Make': make,
+                'Camera Model': model,
+                'Date Taken': date,
+                'Time Taken': time
+              });
+              updateDownloadButton();
+            });
+          };
+          img.src = dataURL;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // --- Utilitaires
+    function setCell(id, value){
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    function sanitizeFilename(name){
+      return String(name).replace(/[^a-zA-Z0-9._-]/g, '');
+    }
+    function escapeHTML(str){
+      return String(str).replace(/[&<>"']/g, (s) => (
+        { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[s]
+      ));
+    }
+    // Convertit un rationnel EXIF en nombre JS
+    function toNumber(r){
+      if (r == null) return null;
+      if (typeof r === 'number') return r;
+      if (typeof r === 'object' && 'numerator' in r && 'denominator' in r) {
+        return (r.denominator === 0) ? 0 : (r.numerator / r.denominator);
+      }
+      const n = Number(r);
+      return isNaN(n) ? null : n;
+    }
+    // DMS -> décimal
+    function dmsToDecimal(dmsArr){
+      if (!dmsArr || !Array.isArray(dmsArr) || dmsArr.length < 3) return null;
+      const d = toNumber(dmsArr[0]), m = toNumber(dmsArr[1]), s = toNumber(dmsArr[2]);
+      if (![d,m,s].every(v => typeof v === 'number' && isFinite(v))) return null;
+      return d + m/60 + s/3600;
+    }
+    // "YYYY:MM:DD HH:MM:SS" -> ["YYYY-MM-DD","HH:MM:SS"]
+    function splitDateTime(dateTime){
+      const parts = String(dateTime).trim().split(/\s+/);
+      const date = (parts[0] || '').replace(/:/g, '-');
+      const time = parts[1] || '';
+      return [date, time];
+    }
+
+    function updateDownloadButton(){
+      downloadBtn.disabled = dataSet.length === 0;
+    }
+
+    // Export CSV (UTF-8 + BOM, compatible Excel)
+    function exportCSV(){
+      const headers = [
+        'Filename','Width','Height','Latitude','Longitude','Altitude',
+        'GPS Image Direction','Camera Make','Camera Model','Date Taken','Time Taken'
+      ];
+      const lines = [];
+      lines.push('sep=,');              // aide Excel à choisir la virgule
+      lines.push(headers.join(','));
+
+      dataSet.forEach(row => {
+        const line = headers.map(h => csvEscape(row[h])).join(',');
+        lines.push(line);
+      });
+
+      const csv = lines.join('\n');
+      const blob = new Blob(['\uFEFF' + csv], { type:'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      a.href = url;
+      a.download = `exif_export_${stamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 0);
+    }
+    function csvEscape(value){
+      if (value === null || value === undefined) return '';
+      const s = String(value);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
+    // Etat initial
+    updateDownloadButton();
+  </script>
+</body>
+</html>
