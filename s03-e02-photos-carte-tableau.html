@@ -87,16 +87,17 @@ Cours Datavis — M2 ACEHN, Univ. Paris 8
         aria-label="Sélectionner des images depuis le stockage local"
       />
 
-      <!-- Bouton 2 : ouvrir la caméra -->
-      <label for="file-input-camera" class="btn" title="Prendre une photo">Prendre une photo</label>
-      <input
-        id="file-input-camera"
-        type="file"
-        accept="image/*"
-        capture="environment" 
-        style="display:none"
-        aria-label="Prendre une photo avec la caméra"
-      />
+      <!-- Bouton 2 : ouvrir la caméra (n'affiche pas les EXIF) 
+        <label for="file-input-camera" class="btn" title="Prendre une photo">Prendre une photo</label> 
+        <input
+          id="file-input-camera"
+          type="file"
+          accept="image/*"
+          capture="environment" 
+          style="display:none"
+          aria-label="Prendre une photo avec la caméra"
+        />
+      -->
 
       <button id="download-csv" class="btn" disabled>Télécharger CSV</button>
     </div>
