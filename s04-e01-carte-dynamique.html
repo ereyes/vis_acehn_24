@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CSV → Map slideshow (with photos)</title>
+
+<!-- Leaflet (map) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- PapaParse (CSV) -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0f172a; --fg:#0b1220;
+    --glass:rgba(255,255,255,.78);
+    --accent:#2563eb; --accent-contrast:#fff;
+    --shadow:0 10px 30px rgba(0,0,0,.25);
+    --radius:16px; --t:260ms cubic-bezier(.2,.8,.2,1);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+
+  /* MAP as background */
+  #map{position:fixed;inset:0;z-index:0}
+  .leaflet-container{pointer-events:none;filter:saturate(1.04) contrast(1.02)}
+  .leaflet-control-attribution{background:rgba(255,255,255,.65);backdrop-filter:blur(6px);border-radius:10px;padding:2px 8px}
+
+  /* Top-left progress badge */
+  #progress{position:fixed;top:12px;left:12px;z-index:3;display:none;
+    color:#fff;background:rgba(15,23,42,.7);backdrop-filter:blur(6px);
+    padding:6px 10px;border-radius:999px;box-shadow:var(--shadow);font-variant-numeric:tabular-nums}
+
+  /* Right sidebar (¼ page) */
+  #sidebar{
+    position:fixed;top:0;right:0;height:100vh;z-index:2;
+    width:clamp(280px,25vw,520px);
+    display:flex;flex-direction:column;gap:12px;
+    background:var(--glass);backdrop-filter:blur(12px) saturate(120%);
+    border-left:1px solid rgba(0,0,0,.08); box-shadow: -8px 0 30px rgba(0,0,0,.18);
+    padding:14px; transform:translateX(0); transition:transform var(--t),opacity var(--t)
+  }
+  #sidebar.hidden{opacity:0; transform:translateX(12px)}
+  .photo-wrap{
+    position:relative;flex:1 1 auto;min-height:0;
+    display:grid;place-items:center;border-radius:12px;overflow:hidden;
+    background:linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.03));
+    border:1px solid rgba(0,0,0,.08)
+  }
+  img#photo{max-width:100%;max-height:100%;object-fit:contain;transition:opacity 240ms ease}
+  img#photo.fading{opacity:0}
+  .caption{flex:0 0 auto;padding:10px 12px;border-radius:12px;
+    background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.08); box-shadow:var(--shadow)}
+  .caption .title{font-size:17px;font-weight:700}
+  .caption .meta{margin-top:6px;font-size:13px;opacity:.8}
+
+  /* Next button (map side) */
+  #next{
+    position:fixed;left:16px;bottom:16px;z-index:3;display:none;
+    width:58px;height:58px;border-radius:50%;border:0;cursor:pointer;
+    background:var(--accent);color:var(--accent-contrast);
+    box-shadow:0 12px 30px rgba(37,99,235,.35);
+    transition:transform .12s ease, box-shadow .12s ease, background var(--t)
+  }
+  #next:hover{transform:translateY(-2px)}
+  #next:active{transform:translateY(0)}
+  #next svg{width:26px;height:26px}
+
+  /* Drop overlay */
+  #drop{
+    position:fixed;inset:0;z-index:4;display:grid;place-items:center;
+    background:
+      radial-gradient(1200px 800px at 20% 20%, rgba(37,99,235,.18), transparent 60%),
+      radial-gradient(1200px 800px at 80% 80%, rgba(16,185,129,.16), transparent 60%);
+    transition:opacity var(--t),visibility var(--t)
+  }
+  #drop.hidden{opacity:0;visibility:hidden}
+  .drop-card{
+    width:min(760px,92vw);padding:clamp(18px,3.6vw,34px);text-align:center;
+    background:var(--glass);backdrop-filter:blur(12px) saturate(120%);
+    border-radius:var(--radius);box-shadow:var(--shadow)
+  }
+  .drop-card h1{margin:.1rem 0 .4rem;font-size:clamp(20px,3.2vw,28px)}
+  .drop-card p{margin:.3rem 0 .75rem}
+  .dropzone{border:2px dashed rgba(37,99,235,.6);border-radius:14px;padding:16px 14px;background:rgba(255,255,255,.6)}
+  .dropzone.drag{background:rgba(37,99,235,.08);border-color:var(--accent);box-shadow:0 0 0 6px rgba(37,99,235,.12) inset}
+  .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:.6rem}
+  .btn{appearance:none;border:0;cursor:pointer;padding:12px 16px;border-radius:12px;
+       font-weight:600;letter-spacing:.2px;background:var(--accent);color:#fff;box-shadow:0 8px 18px rgba(37,99,235,.25)}
+  .btn:hover{transform:translateY(-1px)}
+  .hint{font-size:13px;opacity:.8}
+
+  /* Map marker */
+  .marker-pulse{position:relative;width:18px;height:18px;margin-left:-9px;margin-top:-9px;border-radius:50%;background:#fff;border:3px solid #111;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+  .marker-pulse::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid rgba(37,99,235,.55);animation:pulse 2s infinite}
+  @keyframes pulse{0%{transform:scale(.6);opacity:.9}70%{transform:scale(1.25);opacity:0}100%{transform:scale(1.25);opacity:0}}
+
+  /* Toast */
+  #toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:5;display:none;
+         background:#e11d48;color:#fff;padding:10px 14px;border-radius:12px;box-shadow:var(--shadow);font-weight:700}
+</style>
+</head>
+<body>
+
+<div id="map" aria-hidden="true"></div>
+
+<div id="progress" aria-live="polite">0/0</div>
+
+<!-- Right sidebar -->
+<aside id="sidebar" class="hidden" aria-live="polite" aria-atomic="true">
+  <div class="photo-wrap">
+    <img id="photo" alt="Photo for current row" />
+  </div>
+  <div class="caption">
+    <div class="title" id="desc">Déposser un CSV.</div>
+    <div class="meta" id="meta"></div>
+  </div>
+</aside>
+
+<!-- Next button -->
+<button id="next" aria-label="Next (→)" title="Next (→)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="9 18 15 12 9 6"></polyline>
+  </svg>
+</button>
+
+<!-- Drop overlay -->
+<div id="drop">
+  <div class="drop-card">
+    <h1>Déposer un CSV ici.</h1>
+
+    <p>Votre CSV doit contenir les colonnes : <code>Latitude</code>, <code>Longitude</code>, <code>Description</code>, <code>Filename</code> (nom de fichier de l'image).
+      <br>
+      Les fichier de vos photos doivent se trouver au même endroit de votre CSV. <br>
+      Vous pouvez générer un CSV de vos photos avec cet outil :
+      <a href="https://ereyes.github.io/vis_acehn_24/s03-e02-photos-carte-tableau.html">Photos-Carte-Tableau</a>
+    </p>
+
+    <div id="dropzone" class="dropzone">Drop files</div>
+    <div class="actions">
+      <button class="btn" id="pickCsv">…or choose CSV</button>
+      <input id="csvInput" type="file" accept=".csv,text/csv" hidden>
+      
+
+      <button class="btn" id="pickDir" style="display: none;">Choose folder</button>
+      <input id="dirInput" type="file" webkitdirectory directory multiple hidden>
+
+     
+    </div>
+    <p class="hint">Avance avec la touche <strong>→</strong> de votre clavier.</p>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  /* ---------------- MAP ---------------- */
+  const map = L.map('map', {
+    zoomControl:false, dragging:false, scrollWheelZoom:false, doubleClickZoom:false, boxZoom:false, keyboard:false
+  }).setView([20,0], 2);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const PuckIcon = L.DivIcon.extend({
+    options:{ className:'', iconSize:[18,18], iconAnchor:[9,9], html:'<div class="marker-pulse"></div>' }
+  });
+  const marker = L.marker([0,0], { icon:new PuckIcon() }).addTo(map);
+
+  /* ---------------- DOM ---------------- */
+  const els = {
+    sidebar: document.getElementById('sidebar'),
+    photo: document.getElementById('photo'),
+    desc: document.getElementById('desc'),
+    meta: document.getElementById('meta'),
+    next: document.getElementById('next'),
+    progress: document.getElementById('progress'),
+    drop: document.getElementById('drop'),
+    dropzone: document.getElementById('dropzone'),
+    toast: document.getElementById('toast'),
+    pickCsv: document.getElementById('pickCsv'),
+    csvInput: document.getElementById('csvInput'),
+    pickDir: document.getElementById('pickDir'),
+    dirInput: document.getElementById('dirInput')
+  };
+
+  const showToast = (msg, ms=2600) => {
+    els.toast.textContent = msg; els.toast.style.display = 'inline-block';
+    clearTimeout(els.toast._t); els.toast._t = setTimeout(() => els.toast.style.display='none', ms);
+  };
+
+  /* -------------- Helpers -------------- */
+  const defaultZoom = 16;
+  let rows = [];       // {lat, lon, desc, fileName, date?, time?, raw}
+  let idx = 0;
+  const imageFileByName = new Map(); // key: lowercased basename -> File
+  const objectUrlByName = new Map(); // key: lowercased basename -> objectURL
+
+  const basename = p => String(p||'').split(/[\\/]/).pop();
+  const lc = s => String(s||'').toLowerCase();
+  const normalizeHeader = h => String(h||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const isImageExt = name => /\.(jpe?g|png|webp|gif|bmp|tif|tiff|heic|heif)$/i.test(name);
+
+  // robust number parsing (supports "1.234,56" and "1 234,56")
+  function parseNumber(v){
+    if (typeof v==='number') return v;
+    if (v==null) return NaN;
+    let s = String(v).trim();
+    if (!s) return NaN;
+    if (s.includes(',') && s.includes('.')) { s = s.replace(/\./g,'').replace(',', '.'); }
+    else if (s.includes(',')) { s = s.replace(',', '.'); }
+    s = s.replace(/[\s\u00A0]/g,'');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function findKey(fields, candidates){
+    const norm = new Map(fields.map(f => [normalizeHeader(f), f]));
+    for (const c of candidates) {
+      const found = norm.get(normalizeHeader(c));
+      if (found) return found;
+    }
+    // substring fallback (e.g. "time taken description")
+    for (const [n, raw] of norm.entries()){
+      if (candidates.some(c => n.includes(normalizeHeader(c)))) return raw;
+    }
+    return null;
+  }
+
+  function cleanupObjectUrls(){
+    for (const url of objectUrlByName.values()) URL.revokeObjectURL(url);
+    objectUrlByName.clear();
+  }
+
+  /* -------------- UI updates -------------- */
+  function updateProgress(){ els.progress.textContent = `${rows.length ? idx+1 : 0}/${rows.length}`; }
+
+  function setSidebar({desc, metaHtml, imgName}){
+    // Text
+    els.desc.textContent = desc || '';
+    els.meta.innerHTML = metaHtml || '';
+
+    // Image (crossfade)
+    const old = els.photo;
+    old.classList.add('fading');
+    setTimeout(() => {
+      let src = '';
+      if (imgName) {
+        const key = lc(basename(imgName));
+        // prefer dropped file
+        if (imageFileByName.has(key)) {
+          if (!objectUrlByName.has(key)) {
+            objectUrlByName.set(key, URL.createObjectURL(imageFileByName.get(key)));
+          }
+          src = objectUrlByName.get(key);
+        } else {
+          // fallback: try to load relative to the page (works if HTML sits with the images)
+          src = imgName;
+        }
+      }
+      els.photo.src = src || '';
+      els.photo.alt = imgName ? `Photo: ${basename(imgName)}` : 'No photo';
+      old.classList.remove('fading');
+    }, 120);
+  }
+
+  function flyToCurrent(animate=true){
+    const r = rows[idx]; if (!r) return;
+    marker.setLatLng([r.lat, r.lon]);
+    if (animate) map.flyTo([r.lat, r.lon], defaultZoom, { duration: 2, easeLinearity: .22 });
+    else map.setView([r.lat, r.lon], defaultZoom, { animate:false });
+
+    const metaBits = [];
+    if (r.date) metaBits.push(`<strong>Date:</strong> ${r.date}`);
+    if (r.time) metaBits.push(`<strong>Time:</strong> ${r.time}`);
+    if (r.fileName) metaBits.push(`<strong>File:</strong> ${basename(r.fileName)}`);
+    setSidebar({ desc: r.desc, metaHtml: metaBits.join(' &nbsp;•&nbsp; '), imgName: r.fileName });
+    updateProgress();
+  }
+
+  function next(){
+    if (!rows.length) return;
+    idx = (idx + 1) % rows.length;
+    flyToCurrent(true);
+  }
+
+  /* -------------- CSV ingest -------------- */
+  function processCsvText(text){
+    Papa.parse(text, {
+      header:true, skipEmptyLines:'greedy',
+      complete: res => {
+        const data = res.data || [];
+        if (!data.length) { showToast('CSV is empty or unreadable.'); return; }
+        const fields = res.meta.fields || Object.keys(data[0]);
+
+        const latK = findKey(fields, ['latitude','lat','gps latitude','gps_latitude']);
+        const lonK = findKey(fields, ['longitude','lon','lng','gps longitude','gps_longitude']);
+        const descK = findKey(fields, ['description','desc','caption','comment']);
+        const fileK = findKey(fields, ['filename','file name','file','image','photo','path']);
+        const dateK = findKey(fields, ['date taken','date']);
+        const timeK = findKey(fields, ['time taken','time']);
+
+        if (!latK || !lonK) { showToast('Latitude/Longitude columns not found.'); return; }
+
+        const out = [];
+        for (const row of data){
+          const lat = parseNumber(row[latK]), lon = parseNumber(row[lonK]);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+          out.push({
+            lat, lon,
+            desc: (row[descK] ?? '').toString().trim(),
+            fileName: row[fileK] ?? '',
+            date: row[dateK] ?? '',
+            time: row[timeK] ?? '',
+            raw: row
+          });
+        }
+        if (!out.length) { showToast('No valid rows with coordinates.'); return; }
+
+        rows = out; idx = 0;
+        els.drop.classList.add('hidden');
+        els.sidebar.classList.remove('hidden');
+        els.next.style.display = 'inline-flex';
+        els.progress.style.display = 'inline-block';
+        cleanupObjectUrls();
+        flyToCurrent(false);
+      }
+    });
+  }
+
+  /* -------------- Drop/choose files -------------- */
+  async function collectFromDataTransfer(dt){
+    // Prefer modern File System Access API to traverse dropped directories
+    const items = Array.from(dt.items || []);
+    if (items.some(it => typeof it.getAsFileSystemHandle === 'function')) {
+      const files = [];
+      for (const it of items) {
+        if (!it.getAsFileSystemHandle) continue;
+        const handle = await it.getAsFileSystemHandle();
+        if (!handle) continue;
+        if (handle.kind === 'file') {
+          files.push(await handle.getFile());
+        } else if (handle.kind === 'directory') {
+          for await (const entry of handle.values()) {
+            if (entry.kind === 'file') files.push(await entry.getFile());
+            else if (entry.kind === 'directory') {
+              // recurse one level deeper
+              for await (const e2 of entry.values()) {
+                if (e2.kind === 'file') files.push(await e2.getFile());
+              }
+            }
+          }
+        }
+      }
+      return files;
+    }
+    // Fallback: plain file list
+    return Array.from(dt.files || []);
+  }
+
+  function indexImageFiles(files){
+    imageFileByName.clear();
+    for (const f of files) {
+      const base = lc(basename(f.webkitRelativePath || f.name));
+      if (isImageExt(base) && !imageFileByName.has(base)) {
+        imageFileByName.set(base, f);
+      }
+    }
+  }
+
+  async function handleDropFiles(files){
+    if (!files.length) return;
+    // Index image files for quick lookup
+    indexImageFiles(files);
+
+    // Find the first CSV among the dropped files (prefer .csv)
+    const csv = files.find(f => /\.csv$/i.test(f.name)) || files.find(f => f.type === 'text/csv');
+    if (!csv) { showToast('Please include a CSV.'); return; }
+
+    const text = await csv.text();
+    processCsvText(text);
+  }
+
+  // Drag & drop listeners
+  ['dragenter','dragover'].forEach(evt => {
+    window.addEventListener(evt, e => { e.preventDefault(); els.dropzone.classList.add('drag'); });
+  });
+  ['dragleave','dragend','drop'].forEach(evt => {
+    window.addEventListener(evt, e => { e.preventDefault(); els.dropzone.classList.remove('drag'); });
+  });
+  window.addEventListener('drop', async e => {
+    const files = await collectFromDataTransfer(e.dataTransfer);
+    handleDropFiles(files);
+  });
+
+  // Pickers
+  els.pickCsv.addEventListener('click', () => els.csvInput.click());
+  els.csvInput.addEventListener('change', async e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    indexImageFiles(Array.from(e.target.files)); // might include images if multi-selected
+    processCsvText(await file.text());
+  });
+
+  els.pickDir.addEventListener('click', () => els.dirInput.click());
+  els.dirInput.addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    handleDropFiles(files);
+  });
+
+  // Navigation
+  els.next.addEventListener('click', next);
+  window.addEventListener('keydown', e => { if (e.key === 'ArrowRight') next(); });
+
+})();
+</script>
+</body>
+</html>
