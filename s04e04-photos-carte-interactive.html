@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Photos → Carte animée</title>
+
+<!-- Leaflet (map) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- exifr (EXIF + GPS) -->
+<script src="https://unpkg.com/exifr/dist/full.umd.js"></script>
+
+<style>
+  :root{
+    --bg:#0f172a; --fg:#0b1220;
+    --glass:rgba(255,255,255,.78);
+    --accent:#2563eb; --accent-contrast:#fff;
+    --shadow:0 10px 30px rgba(0,0,0,.25);
+    --radius:16px; --t:260ms cubic-bezier(.2,.8,.2,1);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+
+  /* MAP as background */
+  #map{position:fixed;inset:0;z-index:0}
+  .leaflet-container{pointer-events:none;filter:saturate(1.04) contrast(1.02)}
+  .leaflet-control-attribution{background:rgba(255,255,255,.65);backdrop-filter:blur(6px);border-radius:10px;padding:2px 8px}
+
+  /* Top-left: progress + restart + clear */
+  #topLeft{
+    position:fixed;top:12px;left:12px;z-index:3;
+    display:flex;align-items:center;gap:8px;
+  }
+  #progress{
+    display:none;
+    color:#fff;background:rgba(15,23,42,.7);backdrop-filter:blur(6px);
+    padding:6px 10px;border-radius:999px;box-shadow:var(--shadow);
+    font-variant-numeric:tabular-nums;
+  }
+  #restart,
+  #clearAll{
+    display:none;
+    width:36px;height:36px;border-radius:999px;border:0;
+    cursor:pointer;font-size:18px;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 8px 18px rgba(0,0,0,.45);
+    transition:transform .1s ease, background var(--t), color var(--t);
+  }
+  #restart{
+    background:rgba(15,23,42,.75);color:#e5e7eb;
+  }
+  #restart:hover{transform:translateY(-1px);background:rgba(15,23,42,.95);}
+  #restart:active{transform:translateY(0);}
+
+  #clearAll{
+    background:rgba(239,68,68,.9);color:#fff;
+  }
+  #clearAll:hover{transform:translateY(-1px);background:rgba(248,113,113,1);}
+  #clearAll:active{transform:translateY(0);}
+
+  /* Map style buttons (top-right) */
+  #mapStyles{
+    position:fixed;top:12px;right:12px;z-index:3;
+    display:flex;gap:6px;
+  }
+  .style-btn{
+    border:0;border-radius:999px;padding:6px 10px;
+    background:rgba(15,23,42,.70);color:#e5e7eb;
+    font-size:12px;cursor:pointer;backdrop-filter:blur(6px);
+    box-shadow:0 8px 18px rgba(0,0,0,.35);
+    transition:background var(--t),transform .1s ease,color var(--t);
+  }
+  .style-btn:hover{transform:translateY(-1px)}
+  .style-btn.active{background:var(--accent);color:#fff;}
+
+  /* Right sidebar (¼ page) */
+  #sidebar{
+    position:fixed;top:0;right:0;height:100vh;z-index:2;
+    width:clamp(280px,25vw,520px);
+    display:flex;flex-direction:column;gap:12px;
+    background:var(--glass);backdrop-filter:blur(12px) saturate(120%);
+    border-left:1px solid rgba(0,0,0,.08); box-shadow:-8px 0 30px rgba(0,0,0,.18);
+    padding:14px; transform:translateX(0); transition:transform var(--t),opacity var(--t);
+  }
+  #sidebar.hidden{opacity:0;transform:translateX(12px);}
+  .photo-wrap{
+    position:relative;flex:1 1 auto;min-height:0;
+    display:grid;place-items:center;border-radius:12px;overflow:hidden;
+    background:linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.03));
+    border:1px solid rgba(0,0,0,.08);
+  }
+  img#photo{max-width:100%;max-height:100%;object-fit:contain;transition:opacity 240ms ease;}
+  img#photo.fading{opacity:0;}
+  .caption{
+    flex:0 0 auto;padding:10px 12px;border-radius:12px;
+    background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.08); box-shadow:var(--shadow);
+  }
+  .caption .title{font-size:17px;font-weight:700;}
+  .caption .meta{margin-top:6px;font-size:13px;opacity:.8;}
+
+  /* Sidebar bottom drop/add area */
+  .sidebar-drop{
+    margin-top:auto;
+    padding:10px;
+    border-radius:12px;
+    background:rgba(255,255,255,.9);
+    border:1px solid rgba(148,163,184,.7);
+  }
+  .sidebar-drop-title{
+    font-size:13px;
+    font-weight:600;
+    margin-bottom:4px;
+  }
+  .sidebar-dropzone{
+    font-size:13px;
+    padding:8px;
+    border-radius:8px;
+    border:1px dashed rgba(148,163,184,.9);
+    background:rgba(248,250,252,.95);
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .sidebar-dropzone.drag{
+    border-color:rgba(59,130,246,.9);
+    background:rgba(59,130,246,.06);
+  }
+  .sidebar-actions{
+    margin-top:6px;
+    display:flex;
+    justify-content:flex-end;
+  }
+
+  /* Prev / Next buttons */
+  #navButtons{
+    position:fixed;left:16px;bottom:16px;z-index:3;
+    display:none;gap:10px;
+  }
+  .nav-btn{
+    width:48px;height:48px;border-radius:999px;border:0;
+    cursor:pointer;display:grid;place-items:center;
+    background:var(--accent);color:var(--accent-contrast);
+    box-shadow:0 12px 30px rgba(37,99,235,.35);
+    transition:transform .12s ease, box-shadow .12s ease, background var(--t);
+    font-size:20px;
+  }
+  .nav-btn:hover{transform:translateY(-2px);}
+  .nav-btn:active{transform:translateY(0);}
+
+  /* Fullscreen drop overlay */
+  #drop{
+    position:fixed;inset:0;z-index:4;display:grid;place-items:center;
+    background:
+      radial-gradient(1200px 800px at 20% 20%, rgba(37,99,235,.18), transparent 60%),
+      radial-gradient(1200px 800px at 80% 80%, rgba(16,185,129,.16), transparent 60%);
+    transition:opacity var(--t),visibility var(--t);
+  }
+  #drop.hidden{opacity:0;visibility:hidden;}
+  .drop-card{
+    width:min(760px,92vw);padding:clamp(18px,3.6vw,34px);text-align:center;
+    background:var(--glass);backdrop-filter:blur(12px) saturate(120%);
+    border-radius:var(--radius);box-shadow:var(--shadow);
+  }
+  .drop-card h1{margin:.1rem 0 .4rem;font-size:clamp(20px,3.2vw,28px);}
+  .drop-card p{margin:.3rem 0 .75rem;}
+  .dropzone{
+    border:2px dashed rgba(37,99,235,.6);border-radius:14px;
+    padding:16px 14px;background:rgba(255,255,255,.6);
+  }
+  .dropzone.drag{
+    background:rgba(37,99,235,.08);border-color:var(--accent);
+    box-shadow:0 0 0 6px rgba(37,99,235,.12) inset;
+  }
+  .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:.6rem;}
+  .btn{
+    appearance:none;border:0;cursor:pointer;padding:12px 16px;border-radius:12px;
+    font-weight:600;letter-spacing:.2px;background:var(--accent);color:#fff;
+    box-shadow:0 8px 18px rgba(37,99,235,.25);
+  }
+  .btn.small{
+    padding:8px 12px;font-size:13px;box-shadow:none;
+  }
+  .btn:hover{transform:translateY(-1px);}
+  .hint{font-size:13px;opacity:.8;}
+
+  /* Directional camera marker */
+  .camera-marker{position:relative;width:0;height:0;}
+  .camera-marker .tri{
+    position:relative;
+    width:0;height:0;
+    border-left:10px solid transparent;
+    border-right:10px solid transparent;
+    border-bottom:20px solid #ffffff;
+    filter:drop-shadow(0 2px 6px rgba(0,0,0,.55));
+    transform-origin:50% 80%;
+    transform:rotate(0deg);
+  }
+  .camera-marker .tri::after{
+    content:"";
+    position:absolute;
+    left:-14px;top:10px;
+    width:28px;height:28px;
+    border-radius:50%;
+    border:2px solid rgba(59,130,246,.7);
+    box-shadow:0 0 0 2px rgba(15,23,42,.95);
+    opacity:.8;
+  }
+
+  /* Toast */
+  #toast{
+    position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:5;display:none;
+    background:#e11d48;color:#fff;padding:10px 14px;border-radius:12px;
+    box-shadow:var(--shadow);font-weight:700;
+  }
+</style>
+</head>
+<body>
+
+<div id="map" aria-hidden="true"></div>
+
+<div id="topLeft">
+  <div id="progress" aria-live="polite">0/0</div>
+  <button id="restart" aria-label="Revenir à la première photo" title="Recommencer (R)">↺</button>
+  <button id="clearAll" aria-label="Effacer toutes les photos" title="Effacer toutes les photos">✕</button>
+</div>
+
+<!-- Map style buttons -->
+<div id="mapStyles" aria-label="Styles de carte">
+  <button class="style-btn active" data-style="color">Carte</button>
+  <button class="style-btn" data-style="bw">N&amp;B</button>
+  <button class="style-btn" data-style="sat">Satellite</button>
+</div>
+
+<!-- Right sidebar -->
+<aside id="sidebar" class="hidden" aria-live="polite" aria-atomic="true">
+  <div class="photo-wrap">
+    <img id="photo" alt="Photo actuelle" />
+  </div>
+  <div class="caption">
+    <div class="title" id="desc">Déposez des photos avec GPS.</div>
+    <div class="meta" id="meta"></div>
+  </div>
+  <div class="sidebar-drop">
+    <div class="sidebar-drop-title">Ajouter des photos</div>
+    <div class="sidebar-dropzone" id="sidebarDropzone">Glisser-déposer ici</div>
+    <div class="sidebar-actions">
+      <button class="btn small" id="sidebarPick">Ajouter des images</button>
+      <input id="sidebarInput" type="file" accept="image/*" multiple hidden>
+    </div>
+  </div>
+</aside>
+
+<!-- Prev / Next buttons -->
+<div id="navButtons">
+  <button class="nav-btn" id="prev" aria-label="Précédent (←)" title="Précédent (←)">◀</button>
+  <button class="nav-btn" id="next" aria-label="Suivant (→)" title="Suivant (→)">▶</button>
+</div>
+
+<!-- Fullscreen drop overlay -->
+<div id="drop">
+  <div class="drop-card">
+    <h1>Déposez vos photos ici</h1>
+    <p>Choisissez ou déposez plusieurs images avec coordonnées GPS EXIF
+       (latitude / longitude, et idéalement <code>GPSImgDirection</code>).</p>
+    <div id="dropzone" class="dropzone">Glisser-déposer des photos (JPEG, PNG…)</div>
+    <div class="actions">
+      <button class="btn" id="pickImages">…ou sélectionner des images</button>
+      <input id="imagesInput" type="file" accept="image/*" multiple hidden>
+    </div>
+    <p class="hint">
+      Naviguer avec <strong>←</strong> / <strong>→</strong>.  
+      <strong>R</strong> = revenir à la première photo, <strong>Shift+R</strong> = recharger la page.  
+      Zone en bas à droite pour ajouter des photos à tout moment.  
+      Bouton <strong>✕</strong> pour vider complètement la liste.
+    </p>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  if (!window.exifr) {
+    alert("La librairie EXIFR ne s’est pas chargée (CDN).");
+    return;
+  }
+  const exifr = window.exifr;
+
+  /* ---------------- MAP + base layers ---------------- */
+  const osmColor = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19,
+    attribution:'&copy; OpenStreetMap contributors'
+  });
+  const osmBw = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    maxZoom:19,
+    attribution:'&copy; OpenStreetMap contributors &copy; CARTO'
+  });
+  const esriSat = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+      maxZoom:19,
+      attribution:'Tiles &copy; Esri &mdash; sources multiples'
+    }
+  );
+
+  const baseLayers = { color: osmColor, bw: osmBw, sat: esriSat };
+
+  const map = L.map('map', {
+    zoomControl:false, dragging:false, scrollWheelZoom:false,
+    doubleClickZoom:false, boxZoom:false, keyboard:false,
+    layers:[osmColor]
+  }).setView([20,0], 2);
+
+  let currentBase = osmColor;
+
+  function setBaseLayer(name){
+    const layer = baseLayers[name];
+    if (!layer || layer === currentBase) return;
+    map.removeLayer(currentBase);
+    map.addLayer(layer);
+    currentBase = layer;
+    document.querySelectorAll('#mapStyles .style-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.style === name);
+    });
+  }
+
+  /* ---------------- Camera marker (triangle) ---------------- */
+  const CameraIcon = L.DivIcon.extend({
+    options:{ className:'camera-marker', iconSize:[30,30], iconAnchor:[15,24], html:'<div class="tri"></div>' }
+  });
+  const marker = L.marker([0,0], { icon:new CameraIcon() }).addTo(map);
+
+  function setMarkerHeading(angle){
+    const el = marker.getElement();
+    if (!el) return;
+    const tri = el.querySelector('.tri');
+    if (!tri) return;
+
+    let a = Number(angle);
+    if (!Number.isFinite(a)) {
+      tri.style.transform = 'rotate(0deg)';
+      tri.style.opacity = '0.7';
+      return;
+    }
+    a = ((a % 360) + 360) % 360;
+    tri.style.transform = `rotate(${a}deg)`;
+    tri.style.opacity = '1';
+  }
+
+  /* ---------------- DOM ---------------- */
+  const els = {
+    sidebar: document.getElementById('sidebar'),
+    photo: document.getElementById('photo'),
+    desc: document.getElementById('desc'),
+    meta: document.getElementById('meta'),
+    navButtons: document.getElementById('navButtons'),
+    next: document.getElementById('next'),
+    prev: document.getElementById('prev'),
+    progress: document.getElementById('progress'),
+    restart: document.getElementById('restart'),
+    clearAll: document.getElementById('clearAll'),
+    drop: document.getElementById('drop'),
+    dropzone: document.getElementById('dropzone'),
+    toast: document.getElementById('toast'),
+    pickImages: document.getElementById('pickImages'),
+    imagesInput: document.getElementById('imagesInput'),
+    mapStyles: document.getElementById('mapStyles'),
+    sidebarDropzone: document.getElementById('sidebarDropzone'),
+    sidebarPick: document.getElementById('sidebarPick'),
+    sidebarInput: document.getElementById('sidebarInput')
+  };
+
+  const showToast = (msg, ms=2600) => {
+    els.toast.textContent = msg;
+    els.toast.style.display = 'inline-block';
+    clearTimeout(els.toast._t);
+    els.toast._t = setTimeout(() => { els.toast.style.display = 'none'; }, ms);
+  };
+
+  /* -------------- State & helpers -------------- */
+  const defaultZoom = 16;
+  let rows = [];
+  let idx = 0;
+  let objectUrls = [];
+
+  const basename = p => String(p||'').split(/[\\/]/).pop();
+  const isImageExt = name => /\.(jpe?g|png|webp|gif|bmp|tif|tiff|heic|heif)$/i.test(name);
+
+  function cleanupObjectUrls(){
+    for (const u of objectUrls) URL.revokeObjectURL(u);
+    objectUrls = [];
+  }
+
+  function resetMapView(){
+    map.setView([20,0], 2, { animate:false });
+    marker.setLatLng([20,0]);
+    setMarkerHeading(null);
+  }
+
+  function updateProgress(){
+    els.progress.textContent = `${rows.length ? idx+1 : 0}/${rows.length}`;
+  }
+
+  function setSidebar(row){
+    const { desc, date, time, fileName, url, heading } = row;
+    const metaBits = [];
+    if (date) metaBits.push(`<strong>Date&nbsp;:</strong> ${date}`);
+    if (time) metaBits.push(`<strong>Heure&nbsp;:</strong> ${time}`);
+    if (fileName) metaBits.push(`<strong>Fichier&nbsp;:</strong> ${basename(fileName)}`);
+    if (typeof heading === 'number' && Number.isFinite(heading)) {
+      metaBits.push(`<strong>Direction&nbsp;:</strong> ${Math.round(heading)}°`);
+    }
+
+    els.desc.textContent = desc || basename(fileName) || '';
+    els.meta.innerHTML = metaBits.join(' &nbsp;•&nbsp; ');
+
+    const img = els.photo;
+    img.classList.add('fading');
+    setTimeout(() => {
+      img.src = url || '';
+      img.alt = fileName ? `Photo : ${basename(fileName)}` : 'Photo';
+      img.classList.remove('fading');
+    }, 120);
+  }
+
+  function flyToCurrent(animate=true){
+    const r = rows[idx];
+    if (!r) return;
+    marker.setLatLng([r.lat, r.lon]);
+    setMarkerHeading(r.heading);
+
+    if (animate) {
+      map.flyTo([r.lat, r.lon], defaultZoom, { duration: 2, easeLinearity: .22 });
+    } else {
+      map.setView([r.lat, r.lon], defaultZoom, { animate:false });
+    }
+
+    setSidebar(r);
+    updateProgress();
+  }
+
+  function next(){
+    if (!rows.length) return;
+    idx = (idx + 1) % rows.length;
+    flyToCurrent(true);
+  }
+
+  function prev(){
+    if (!rows.length) return;
+    idx = (idx - 1 + rows.length) % rows.length;
+    flyToCurrent(true);
+  }
+
+  function restart(){
+    if (!rows.length) return;
+    idx = 0;
+    flyToCurrent(true);
+  }
+
+  function clearAll(){
+    if (!rows.length) {
+      showToast('Aucune photo à effacer.', 1800);
+      return;
+    }
+    rows = [];
+    idx = 0;
+    cleanupObjectUrls();
+    els.sidebar.classList.add('hidden');
+    els.navButtons.style.display = 'none';
+    els.progress.style.display = 'none';
+    els.restart.style.display = 'none';
+    els.clearAll.style.display = 'none';
+    els.desc.textContent = 'Déposez des photos avec GPS.';
+    els.meta.textContent = '';
+    els.photo.src = '';
+    els.photo.alt = 'Aucune photo';
+    resetMapView();
+    els.drop.classList.remove('hidden');
+    showToast('Toutes les photos ont été effacées.', 2200);
+  }
+
+  /* -------------- Build rows from image files -------------- */
+  async function buildFromFiles(files, append=false){
+    const imgFiles = Array.from(files).filter(f => isImageExt(f.name));
+    if (!imgFiles.length) {
+      showToast('Aucune image détectée.');
+      return;
+    }
+
+    if (!append) {
+      cleanupObjectUrls();
+    }
+
+    const results = [];
+
+    for (const file of imgFiles) {
+      try {
+        const gps = await exifr.gps(file);
+        if (!gps || typeof gps.latitude !== 'number' || typeof gps.longitude !== 'number') continue;
+
+        const exifData = await exifr.parse(file, ['DateTimeOriginal','CreateDate','GPSImgDirection']).catch(() => ({}));
+
+        let dateStr = '', timeStr = '';
+        const dt = exifData.DateTimeOriginal || exifData.CreateDate;
+        if (dt instanceof Date) {
+          dateStr = dt.toISOString().slice(0,10);
+          timeStr = dt.toTimeString().slice(0,8);
+        }
+
+        let heading = null;
+        const candidates = [
+          gps.imgDirection,
+          gps.GPSImgDirection,
+          exifData.GPSImgDirection,
+          gps.heading,
+          gps.direction
+        ];
+        for (const v of candidates) {
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            heading = v;
+            break;
+          }
+        }
+        if (heading != null) {
+          heading = ((heading % 360) + 360) % 360;
+        }
+
+        const url = URL.createObjectURL(file);
+        objectUrls.push(url);
+
+        results.push({
+          lat: gps.latitude,
+          lon: gps.longitude,
+          desc: basename(file.name),
+          fileName: file.name,
+          date: dateStr,
+          time: timeStr,
+          heading,
+          url
+        });
+      } catch (err) {
+        console.error('EXIF error', err);
+      }
+    }
+
+    if (!results.length) {
+      showToast(append ? 'Aucune nouvelle photo avec coordonnées GPS.' : 'Aucune photo avec coordonnées GPS trouvée.');
+      return;
+    }
+
+    // sort new results by date if present
+    results.sort((a,b) => {
+      if (a.date && b.date) return a.date.localeCompare(b.date);
+      return 0;
+    });
+
+    const added = results.length;
+    let message = '';
+
+    if (append && rows.length) {
+      rows = rows.concat(results);
+      message = `${added} photo(s) ajoutée(s). Total : ${rows.length}.`;
+    } else {
+      rows = results;
+      idx = 0;
+      message = `${rows.length} photo(s) chargée(s).`;
+    }
+
+    els.drop.classList.add('hidden');
+    els.sidebar.classList.remove('hidden');
+    els.navButtons.style.display = 'flex';
+    els.progress.style.display = 'inline-block';
+    els.restart.style.display = 'flex';
+    els.clearAll.style.display = 'flex';
+
+    flyToCurrent(false);
+    showToast(message, 2600);
+  }
+
+  /* -------------- Global drag & drop (fullscreen) -------------- */
+  ['dragenter','dragover'].forEach(evt => {
+    window.addEventListener(evt, e => {
+      e.preventDefault();
+      els.dropzone.classList.add('drag');
+    });
+  });
+  ['dragleave','dragend','drop'].forEach(evt => {
+    window.addEventListener(evt, e => {
+      e.preventDefault();
+      els.dropzone.classList.remove('drag');
+    });
+  });
+
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files || [];
+    if (!files.length) return;
+    buildFromFiles(files, rows.length > 0);
+  });
+
+  // Fullscreen picker
+  els.pickImages.addEventListener('click', () => els.imagesInput.click());
+  els.imagesInput.addEventListener('change', e => {
+    const files = e.target.files || [];
+    if (!files.length) return;
+    buildFromFiles(files, rows.length > 0);
+  });
+
+  /* -------------- Sidebar add-files controls -------------- */
+  els.sidebarPick.addEventListener('click', () => els.sidebarInput.click());
+  els.sidebarInput.addEventListener('change', e => {
+    const files = e.target.files || [];
+    if (!files.length) return;
+    buildFromFiles(files, true);
+  });
+
+  ['dragenter','dragover'].forEach(evt => {
+    els.sidebarDropzone.addEventListener(evt, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      els.sidebarDropzone.classList.add('drag');
+    });
+  });
+  ['dragleave','dragend'].forEach(evt => {
+    els.sidebarDropzone.addEventListener(evt, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      els.sidebarDropzone.classList.remove('drag');
+    });
+  });
+  els.sidebarDropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    els.sidebarDropzone.classList.remove('drag');
+    const files = e.dataTransfer?.files || [];
+    if (!files.length) return;
+    buildFromFiles(files, true);
+  });
+
+  /* -------------- Map styles -------------- */
+  els.mapStyles.addEventListener('click', e => {
+    const btn = e.target.closest('.style-btn');
+    if (!btn) return;
+    setBaseLayer(btn.dataset.style);
+  });
+
+  /* -------------- Navigation & restart/clear -------------- */
+  els.next.addEventListener('click', next);
+  els.prev.addEventListener('click', prev);
+  els.restart.addEventListener('click', restart);
+  els.clearAll.addEventListener('click', clearAll);
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') next();
+    else if (e.key === 'ArrowLeft') prev();
+    else if (e.key === 'r' || e.key === 'R') {
+      if (e.shiftKey) {
+        window.location.reload();      // hard restart: reload page
+      } else {
+        restart();                     // soft restart: go to first photo
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
