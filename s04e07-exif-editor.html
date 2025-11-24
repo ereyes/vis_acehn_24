@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>EXIF Editor (Client-side)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- piexifjs from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 1.5rem;
+      line-height: 1.4;
+      background-color: whitesmoke;
+    }
+    .header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 0.25rem;
+    }
+    .lang-toggle {
+      padding: 0.25rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid #999;
+      background: #eee;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .panel {
+      flex: 1 1 280px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 0.75rem;
+    }
+    label {
+      font-weight: 600;
+      display: block;
+      margin: 0.5rem 0 0.25rem;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.3rem 0.4rem;
+      box-sizing: border-box;
+    }
+    textarea {
+      width: 100%;
+      min-height: 260px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.85rem;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid #999;
+      background: #f2f2f2;
+    }
+    button.apply-btn {
+      background: #4caf50;
+      border-color: #4caf50;
+      color: #fff;
+    }
+    button.remove-btn {
+      background: #f44336;
+      border-color: #f44336;
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    #preview {
+      max-width: 100%;
+      max-height: 300px;
+      display: block;
+      margin-top: 0.5rem;
+      border: 1px solid #ddd;
+      object-fit: contain;
+    }
+    #downloadLink {
+      display: inline-block;
+      margin-top: 0.5rem;
+    }
+    .note {
+      font-size: 0.8rem;
+      color: #555;
+    }
+    .hint {
+      font-size: 0.75rem;
+      color: #666;
+      margin-top: 0.1rem;
+      margin-bottom: 0.35rem;
+    }
+    .drop-zone {
+      margin-top: 0.5rem;
+      padding: 1rem;
+      border: 2px dashed #aaa;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    .drop-zone.dragover {
+      border-color: #4caf50;
+      background: #f6fff7;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <h1 data-i18n-key="title">EXIF Viewer / Editor (all client-side)</h1>
+    <button id="langToggleBtn" class="lang-toggle" type="button" style="background-color: blue; color: white;">FR</button>
+  </div>
+
+  <p class="note" data-i18n-key="note">
+    Images never leave your browser. Works best with JPEG files containing EXIF data.
+  </p>
+
+  <label for="fileInput" data-i18n-key="fileLabel">Choose a JPEG image:</label>
+  <input id="fileInput" type="file" accept="image/jpeg" />
+
+  <div id="dropZone" class="drop-zone" data-i18n-key="dropLabel">
+    Or drop a JPEG file here
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2 data-i18n-key="panelExifTitle">EXIF JSON</h2>
+      <textarea id="exifOutput" readonly data-i18n-placeholder="exifTextareaPlaceholder"
+        placeholder="Load an image to see EXIF here..."></textarea>
+    </div>
+
+    <div class="panel">
+      <h2 data-i18n-key="panelEditTitle">Simple edit</h2>
+      <p class="note" data-i18n-key="panelEditNote">
+        Edit some common tags. Leave a field blank to remove that tag when you click “Apply”.
+      </p>
+
+      <!-- Camera info -->
+      <label for="makeInput" data-i18n-key="makeLabel">Make (piexif.ImageIFD.Make)</label>
+      <input
+        type="text"
+        id="makeInput"
+        data-i18n-placeholder="makePlaceholder"
+        placeholder="e.g. Canon, Nikon, Apple"
+      />
+      <div class="hint" data-i18n-key="makeHint">
+        Camera manufacturer / device maker.
+      </div>
+
+      <label for="modelInput" data-i18n-key="modelLabel">Model (piexif.ImageIFD.Model)</label>
+      <input
+        type="text"
+        id="modelInput"
+        data-i18n-placeholder="modelPlaceholder"
+        placeholder="e.g. EOS R5, iPhone 15 Pro"
+      />
+      <div class="hint" data-i18n-key="modelHint">
+        Camera or device model.
+      </div>
+
+      <label for="dateTimeInput" data-i18n-key="dateTimeLabel">
+        DateTime (ImageIFD.DateTime &amp; DateTimeOriginal)
+      </label>
+      <input
+        type="text"
+        id="dateTimeInput"
+        data-i18n-placeholder="dateTimePlaceholder"
+        placeholder="YYYY:MM:DD HH:MM:SS (e.g. 2025:01:31 14:30:00)"
+      />
+      <div class="hint" data-i18n-key="dateTimeHint">
+        EXIF’s usual format: year:month:day hour:minute:second.
+      </div>
+
+      <!-- GPS -->
+      <label for="gpsLatInput" data-i18n-key="gpsLatLabel">GPS Latitude</label>
+      <input
+        type="text"
+        id="gpsLatInput"
+        data-i18n-placeholder="gpsLatPlaceholder"
+        placeholder="Decimal degrees, e.g. 37.7749 (N+, S-)"
+      />
+      <div class="hint" data-i18n-key="gpsLatHint">
+        Enter decimal latitude. North is positive, south is negative.
+      </div>
+
+      <label for="gpsLonInput" data-i18n-key="gpsLonLabel">GPS Longitude</label>
+      <input
+        type="text"
+        id="gpsLonInput"
+        data-i18n-placeholder="gpsLonPlaceholder"
+        placeholder="Decimal degrees, e.g. -122.4194 (E+, W-)"
+      />
+      <div class="hint" data-i18n-key="gpsLonHint">
+        Enter decimal longitude. East is positive, west is negative.
+      </div>
+
+      <label for="gpsAltInput" data-i18n-key="gpsAltLabel">GPS Altitude (meters)</label>
+      <input
+        type="text"
+        id="gpsAltInput"
+        data-i18n-placeholder="gpsAltPlaceholder"
+        placeholder="Meters, e.g. 15.3 (negative below sea level)"
+      />
+      <div class="hint" data-i18n-key="gpsAltHint">
+        Altitude in meters. Negative values are below sea level.
+      </div>
+
+      <label for="gpsDirInput" data-i18n-key="gpsDirLabel">GPS Image Direction (degrees)</label>
+      <input
+        type="text"
+        id="gpsDirInput"
+        data-i18n-placeholder="gpsDirPlaceholder"
+        placeholder="0–359.99, e.g. 90 = east"
+      />
+      <div class="hint" data-i18n-key="gpsDirHint">
+        Direction the camera was pointing (0 = north, 90 = east, etc.).
+      </div>
+
+      <!-- Artist / copyright -->
+      <label for="artistInput" data-i18n-key="artistLabel">
+        Artist (piexif.ImageIFD.Artist)
+      </label>
+      <input
+        type="text"
+        id="artistInput"
+        data-i18n-placeholder="artistPlaceholder"
+        placeholder="Optional"
+      />
+
+      <label for="copyrightInput" data-i18n-key="copyrightLabel">
+        Copyright (piexif.ImageIFD.Copyright)
+      </label>
+      <input
+        type="text"
+        id="copyrightInput"
+        data-i18n-placeholder="copyrightPlaceholder"
+        placeholder="Optional"
+      />
+
+      <button id="applyEditBtn" class="apply-btn" disabled data-i18n-key="applyBtn">
+        Apply edit &amp; generate new image
+      </button>
+      <br />
+      <button id="removeExifBtn" class="remove-btn" disabled data-i18n-key="removeBtn">
+        Remove all EXIF &amp; generate new image
+      </button>
+
+      <a id="downloadLink" download="" style="display:none;">Download edited image</a>
+      <img id="preview" alt="Preview" />
+    </div>
+  </div>
+
+  <script>
+    // --- Translations ---
+    const strings = {
+      en: {
+        title: "EXIF Viewer / Editor (all client-side)",
+        note: "Images never leave your browser. Works best with JPEG files containing EXIF data.",
+        fileLabel: "Choose a JPEG image:",
+        dropLabel: "Or drop a JPEG file here",
+        panelExifTitle: "EXIF JSON",
+        panelEditTitle: "Simple edit",
+        panelEditNote: "Edit some common tags. Leave a field blank to remove that tag when you click “Apply”.",
+
+        makeLabel: "Make (piexif.ImageIFD.Make)",
+        makePlaceholder: "e.g. Canon, Nikon, Apple",
+        makeHint: "Camera manufacturer / device maker.",
+        modelLabel: "Model (piexif.ImageIFD.Model)",
+        modelPlaceholder: "e.g. EOS R5, iPhone 15 Pro",
+        modelHint: "Camera or device model.",
+        dateTimeLabel: "DateTime (ImageIFD.DateTime & DateTimeOriginal)",
+        dateTimePlaceholder: "YYYY:MM:DD HH:MM:SS (e.g. 2025:01:31 14:30:00)",
+        dateTimeHint: "EXIF’s usual format: year:month:day hour:minute:second.",
+
+        gpsLatLabel: "GPS Latitude",
+        gpsLatPlaceholder: "Decimal degrees, e.g. 37.7749 (N+, S-)",
+        gpsLatHint: "Enter decimal latitude. North is positive, south is negative.",
+        gpsLonLabel: "GPS Longitude",
+        gpsLonPlaceholder: "Decimal degrees, e.g. -122.4194 (E+, W-)",
+        gpsLonHint: "Enter decimal longitude. East is positive, west is negative.",
+        gpsAltLabel: "GPS Altitude (meters)",
+        gpsAltPlaceholder: "Meters, e.g. 15.3 (negative below sea level)",
+        gpsAltHint: "Altitude in meters. Negative values are below sea level.",
+        gpsDirLabel: "GPS Image Direction (degrees)",
+        gpsDirPlaceholder: "0–359.99, e.g. 90 = east",
+        gpsDirHint: "Direction the camera was pointing (0 = north, 90 = east, etc.).",
+
+        artistLabel: "Artist (piexif.ImageIFD.Artist)",
+        artistPlaceholder: "Optional",
+        copyrightLabel: "Copyright (piexif.ImageIFD.Copyright)",
+        copyrightPlaceholder: "Optional",
+
+        applyBtn: "Apply edit & generate new image",
+        removeBtn: "Remove all EXIF & generate new image",
+        exifTextareaPlaceholder: "Load an image to see EXIF here...",
+        previewAlt: "Preview",
+
+        onlyJpegError: "This demo only handles JPEG files with EXIF.",
+        fileReadError: "Error reading file.",
+        noExifErrorPrefix: "No readable EXIF found or error parsing.",
+        latNumberError: "GPS latitude must be a number (decimal degrees).",
+        lonNumberError: "GPS longitude must be a number (decimal degrees).",
+        altNumberError: "GPS altitude must be a number (meters).",
+        dirNumberError: "GPS image direction must be a number (degrees).",
+        allExifRemoved: "All EXIF removed.",
+        downloadPrefix: "Download ",
+        footerCredits: "E. Reyes, 2025. Tool with pedagogical and scientific purposes only. The site does not collect or saves your data.",
+        footerLicense: "Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)."
+
+      },
+      fr: {
+        title: "Visualiseur / Éditeur EXIF (entièrement côté client)",
+        note: "Les images ne quittent jamais votre navigateur. Fonctionne mieux avec des fichiers JPEG contenant des données EXIF.",
+        fileLabel: "Choisissez une image JPEG :",
+        dropLabel: "Ou déposez un fichier JPEG ici",
+        panelExifTitle: "JSON EXIF",
+        panelEditTitle: "Modification simple",
+        panelEditNote: "Modifiez quelques balises courantes. Laissez un champ vide pour supprimer la balise lorsque vous cliquez sur « Appliquer ».",
+
+        makeLabel: "Marque (piexif.ImageIFD.Make)",
+        makePlaceholder: "ex. Canon, Nikon, Apple",
+        makeHint: "Fabricant de l’appareil photo / du périphérique.",
+        modelLabel: "Modèle (piexif.ImageIFD.Model)",
+        modelPlaceholder: "ex. EOS R5, iPhone 15 Pro",
+        modelHint: "Modèle de l’appareil photo ou du périphérique.",
+        dateTimeLabel: "DateTime (ImageIFD.DateTime & DateTimeOriginal)",
+        dateTimePlaceholder: "AAAA:MM:JJ HH:MM:SS (ex. 2025:01:31 14:30:00)",
+        dateTimeHint: "Format EXIF habituel : année:mois:jour heure:minute:seconde.",
+
+        gpsLatLabel: "Latitude GPS",
+        gpsLatPlaceholder: "Degrés décimaux, ex. 48.8566 (N+, S-)",
+        gpsLatHint: "Entrez une latitude décimale. Nord positif, sud négatif.",
+        gpsLonLabel: "Longitude GPS",
+        gpsLonPlaceholder: "Degrés décimaux, ex. 2.3522 (E+, W-)",
+        gpsLonHint: "Entrez une longitude décimale. Est positif, ouest négatif.",
+        gpsAltLabel: "Altitude GPS (mètres)",
+        gpsAltPlaceholder: "Mètres, ex. 35.5 (négatif sous le niveau de la mer)",
+        gpsAltHint: "Altitude en mètres. Les valeurs négatives sont sous le niveau de la mer.",
+        gpsDirLabel: "Direction de l’image GPS (degrés)",
+        gpsDirPlaceholder: "0–359.99, ex. 90 = est",
+        gpsDirHint: "Direction de prise de vue (0 = nord, 90 = est, etc.).",
+
+        artistLabel: "Artiste (piexif.ImageIFD.Artist)",
+        artistPlaceholder: "Facultatif",
+        copyrightLabel: "Copyright (piexif.ImageIFD.Copyright)",
+        copyrightPlaceholder: "Facultatif",
+
+        applyBtn: "Appliquer les modifications et générer une nouvelle image",
+        removeBtn: "Supprimer toutes les données EXIF et générer une nouvelle image",
+        exifTextareaPlaceholder: "Chargez une image pour afficher ses données EXIF ici...",
+        previewAlt: "Aperçu",
+
+        onlyJpegError: "Cette démo ne gère que les fichiers JPEG avec EXIF.",
+        fileReadError: "Erreur lors de la lecture du fichier.",
+        noExifErrorPrefix: "Aucune donnée EXIF lisible ou erreur d’analyse.",
+        latNumberError: "La latitude GPS doit être un nombre (degrés décimaux).",
+        lonNumberError: "La longitude GPS doit être un nombre (degrés décimaux).",
+        altNumberError: "L’altitude GPS doit être un nombre (mètres).",
+        dirNumberError: "La direction de l’image GPS doit être un nombre (degrés).",
+        allExifRemoved: "Toutes les données EXIF ont été supprimées.",
+        downloadPrefix: "Télécharger ",
+        footerCredits: "E. Reyes, 2025. Outil à vocation pédagogique et scientifique uniquement. Ce site ne collecte ni n'enregistre vos données.",
+        footerLicense: "Sous licence Creative Commons Attribution - Partage dans les Mêmes Conditions 4.0 International (CC BY-SA 4.0)."
+
+      }
+    };
+
+    let currentLang = "en";
+    let originalFileName = null;
+    let currentDataUrl = null;
+
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const exifOutput = document.getElementById("exifOutput");
+    const makeInput = document.getElementById("makeInput");
+    const modelInput = document.getElementById("modelInput");
+    const dateTimeInput = document.getElementById("dateTimeInput");
+    const gpsLatInput = document.getElementById("gpsLatInput");
+    const gpsLonInput = document.getElementById("gpsLonInput");
+    const gpsAltInput = document.getElementById("gpsAltInput");
+    const gpsDirInput = document.getElementById("gpsDirInput");
+    const artistInput = document.getElementById("artistInput");
+    const copyrightInput = document.getElementById("copyrightInput");
+    const applyEditBtn = document.getElementById("applyEditBtn");
+    const removeExifBtn = document.getElementById("removeExifBtn");
+    const preview = document.getElementById("preview");
+    const downloadLink = document.getElementById("downloadLink");
+    const langToggleBtn = document.getElementById("langToggleBtn");
+
+    // --- Event listeners ---
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (file) {
+        loadFile(file);
+      }
+    });
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add("dragover");
+    });
+
+    dropZone.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("dragover");
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("dragover");
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        loadFile(file);
+        // Reset file input so selecting the same file again still fires change
+        fileInput.value = "";
+      }
+    });
+
+    applyEditBtn.addEventListener("click", () => generateEditedImage(false));
+    removeExifBtn.addEventListener("click", () => generateEditedImage(true));
+
+    langToggleBtn.addEventListener("click", () => {
+      currentLang = currentLang === "en" ? "fr" : "en";
+      applyTranslations();
+    });
+
+    // --- Translation helper ---
+
+    function applyTranslations() {
+      const dict = strings[currentLang];
+
+      document.querySelectorAll("[data-i18n-key]").forEach((el) => {
+        const key = el.getAttribute("data-i18n-key");
+        if (dict[key]) {
+          el.textContent = dict[key];
+        }
+      });
+
+      document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+        const key = el.getAttribute("data-i18n-placeholder");
+        if (dict[key]) {
+          el.placeholder = dict[key];
+        }
+      });
+
+      exifOutput.placeholder = dict.exifTextareaPlaceholder;
+      preview.alt = dict.previewAlt;
+
+      // Button shows which language you can switch TO
+      langToggleBtn.textContent = currentLang === "en" ? "FR" : "EN";
+    }
+
+    // --- File loading & EXIF reading ---
+
+    function loadFile(file) {
+      if (!file) return;
+
+      if (!file.type || !file.type.includes("jpeg")) {
+        alert(strings[currentLang].onlyJpegError);
+        return;
+      }
+
+      originalFileName = file.name || "image.jpg";
+      const reader = new FileReader();
+
+      reader.onload = function (e) {
+        const dataUrl = e.target.result;
+        currentDataUrl = dataUrl;
+        preview.src = dataUrl;
+
+        try {
+          const exifObj = piexif.load(dataUrl);
+          exifOutput.value = JSON.stringify(exifObj, null, 2);
+
+          const zeroth = exifObj["0th"] || {};
+          const exif = exifObj["Exif"] || {};
+          const gps = exifObj["GPS"] || {};
+
+          // Prefill camera info
+          makeInput.value = zeroth[piexif.ImageIFD.Make] || "";
+          modelInput.value = zeroth[piexif.ImageIFD.Model] || "";
+          const dt =
+            zeroth[piexif.ImageIFD.DateTime] ||
+            exif[piexif.ExifIFD.DateTimeOriginal] ||
+            "";
+          dateTimeInput.value = dt || "";
+
+          // Prefill GPS latitude
+          if (gps[piexif.GPSIFD.GPSLatitude] && gps[piexif.GPSIFD.GPSLatitudeRef]) {
+            const latDec = dmsRationalToDecimal(
+              gps[piexif.GPSIFD.GPSLatitude],
+              gps[piexif.GPSIFD.GPSLatitudeRef]
+            );
+            gpsLatInput.value =
+              typeof latDec === "number" && !Number.isNaN(latDec)
+                ? latDec.toFixed(6)
+                : "";
+          } else {
+            gpsLatInput.value = "";
+          }
+
+          // Prefill GPS longitude
+          if (gps[piexif.GPSIFD.GPSLongitude] && gps[piexif.GPSIFD.GPSLongitudeRef]) {
+            const lonDec = dmsRationalToDecimal(
+              gps[piexif.GPSIFD.GPSLongitude],
+              gps[piexif.GPSIFD.GPSLongitudeRef]
+            );
+            gpsLonInput.value =
+              typeof lonDec === "number" && !Number.isNaN(lonDec)
+                ? lonDec.toFixed(6)
+                : "";
+          } else {
+            gpsLonInput.value = "";
+          }
+
+          // Prefill GPS altitude
+          if (gps[piexif.GPSIFD.GPSAltitude]) {
+            const altRat = gps[piexif.GPSIFD.GPSAltitude];
+            let alt = altRat[0] / altRat[1];
+            if (gps[piexif.GPSIFD.GPSAltitudeRef] === 1) {
+              alt = -alt;
+            }
+            gpsAltInput.value =
+              typeof alt === "number" && !Number.isNaN(alt)
+                ? alt.toFixed(2)
+                : "";
+          } else {
+            gpsAltInput.value = "";
+          }
+
+          // Prefill GPS image direction
+          if (gps[piexif.GPSIFD.GPSImgDirection]) {
+            const dirRat = gps[piexif.GPSIFD.GPSImgDirection];
+            const dir = dirRat[0] / dirRat[1];
+            gpsDirInput.value =
+              typeof dir === "number" && !Number.isNaN(dir)
+                ? dir.toFixed(2)
+                : "";
+          } else {
+            gpsDirInput.value = "";
+          }
+
+          // Artist / copyright
+          artistInput.value = zeroth[piexif.ImageIFD.Artist] || "";
+          copyrightInput.value = zeroth[piexif.ImageIFD.Copyright] || "";
+
+          applyEditBtn.disabled = false;
+          removeExifBtn.disabled = false;
+        } catch (err) {
+          console.error(err);
+          exifOutput.value =
+            strings[currentLang].noExifErrorPrefix + "\n\n" + err;
+          applyEditBtn.disabled = true;
+          removeExifBtn.disabled = false;
+
+          // Clear form fields
+          makeInput.value = "";
+          modelInput.value = "";
+          dateTimeInput.value = "";
+          gpsLatInput.value = "";
+          gpsLonInput.value = "";
+          gpsAltInput.value = "";
+          gpsDirInput.value = "";
+          artistInput.value = "";
+          copyrightInput.value = "";
+        }
+
+        resetDownload();
+      };
+
+      reader.onerror = () => alert(strings[currentLang].fileReadError);
+      reader.readAsDataURL(file);
+    }
+
+    function resetDownload() {
+      downloadLink.style.display = "none";
+      downloadLink.href = "";
+      downloadLink.download = "";
+    }
+
+    // --- Editing & saving ---
+
+    function generateEditedImage(stripAll) {
+      if (!currentDataUrl) return;
+
+      try {
+        let outputDataUrl;
+
+        if (stripAll) {
+          // Remove EXIF entirely
+          outputDataUrl = piexif.remove(currentDataUrl);
+        } else {
+          const exifObj = piexif.load(currentDataUrl);
+
+          const zeroth = exifObj["0th"] || {};
+          const exif = exifObj["Exif"] || {};
+          const gps = exifObj["GPS"] || {};
+
+          // Camera info
+          const make = makeInput.value.trim();
+          const model = modelInput.value.trim();
+          const dt = dateTimeInput.value.trim();
+
+          if (make) {
+            zeroth[piexif.ImageIFD.Make] = make;
+          } else {
+            delete zeroth[piexif.ImageIFD.Make];
+          }
+
+          if (model) {
+            zeroth[piexif.ImageIFD.Model] = model;
+          } else {
+            delete zeroth[piexif.ImageIFD.Model];
+          }
+
+          if (dt) {
+            zeroth[piexif.ImageIFD.DateTime] = dt;
+            exif[piexif.ExifIFD.DateTimeOriginal] = dt;
+            exif[piexif.ExifIFD.DateTimeDigitized] = dt;
+          } else {
+            delete zeroth[piexif.ImageIFD.DateTime];
+            delete exif[piexif.ExifIFD.DateTimeOriginal];
+            delete exif[piexif.ExifIFD.DateTimeDigitized];
+          }
+
+          // GPS: latitude
+          const latStr = gpsLatInput.value.trim();
+          if (latStr) {
+            const lat = Number(latStr);
+            if (Number.isNaN(lat)) {
+              alert(strings[currentLang].latNumberError);
+              return;
+            }
+            const latRef = lat >= 0 ? "N" : "S";
+            gps[piexif.GPSIFD.GPSLatitudeRef] = latRef;
+            gps[piexif.GPSIFD.GPSLatitude] = decimalToDmsRational(lat);
+          } else {
+            delete gps[piexif.GPSIFD.GPSLatitude];
+            delete gps[piexif.GPSIFD.GPSLatitudeRef];
+          }
+
+          // GPS: longitude
+          const lonStr = gpsLonInput.value.trim();
+          if (lonStr) {
+            const lon = Number(lonStr);
+            if (Number.isNaN(lon)) {
+              alert(strings[currentLang].lonNumberError);
+              return;
+            }
+            const lonRef = lon >= 0 ? "E" : "W";
+            gps[piexif.GPSIFD.GPSLongitudeRef] = lonRef;
+            gps[piexif.GPSIFD.GPSLongitude] = decimalToDmsRational(lon);
+          } else {
+            delete gps[piexif.GPSIFD.GPSLongitude];
+            delete gps[piexif.GPSIFD.GPSLongitudeRef];
+          }
+
+          // GPS: altitude
+          const altStr = gpsAltInput.value.trim();
+          if (altStr) {
+            const alt = Number(altStr);
+            if (Number.isNaN(alt)) {
+              alert(strings[currentLang].altNumberError);
+              return;
+            }
+            gps[piexif.GPSIFD.GPSAltitudeRef] = alt >= 0 ? 0 : 1;
+            const absAlt = Math.abs(alt);
+            gps[piexif.GPSIFD.GPSAltitude] = [
+              Math.round(absAlt * 100),
+              100
+            ]; // 2 decimals
+          } else {
+            delete gps[piexif.GPSIFD.GPSAltitude];
+            delete gps[piexif.GPSIFD.GPSAltitudeRef];
+          }
+
+          // GPS: image direction
+          const dirStr = gpsDirInput.value.trim();
+          if (dirStr) {
+            let dir = Number(dirStr);
+            if (Number.isNaN(dir)) {
+              alert(strings[currentLang].dirNumberError);
+              return;
+            }
+            dir = ((dir % 360) + 360) % 360; // normalize
+            gps[piexif.GPSIFD.GPSImgDirectionRef] = "T"; // true north
+            gps[piexif.GPSIFD.GPSImgDirection] = [
+              Math.round(dir * 100),
+              100
+            ];
+          } else {
+            delete gps[piexif.GPSIFD.GPSImgDirection];
+            delete gps[piexif.GPSIFD.GPSImgDirectionRef];
+          }
+
+          // Artist / copyright
+          const artist = artistInput.value.trim();
+          const copyright = copyrightInput.value.trim();
+
+          if (artist) {
+            zeroth[piexif.ImageIFD.Artist] = artist;
+          } else {
+            delete zeroth[piexif.ImageIFD.Artist];
+          }
+
+          if (copyright) {
+            zeroth[piexif.ImageIFD.Copyright] = copyright;
+          } else {
+            delete zeroth[piexif.ImageIFD.Copyright];
+          }
+
+          exifObj["0th"] = zeroth;
+          exifObj["Exif"] = exif;
+          exifObj["GPS"] = gps;
+
+          const exifBytes = piexif.dump(exifObj);
+          outputDataUrl = piexif.insert(exifBytes, currentDataUrl);
+        }
+
+        preview.src = outputDataUrl;
+        currentDataUrl = outputDataUrl;
+
+        const suffix = stripAll ? "-no-exif" : "-edited";
+        const newName = (originalFileName || "image.jpg").replace(
+          /(\.[^.]+)?$/,
+          suffix + "$1"
+        );
+
+        const dict = strings[currentLang];
+        downloadLink.href = outputDataUrl;
+        downloadLink.download = newName;
+        downloadLink.textContent = dict.downloadPrefix + newName;
+        downloadLink.style.display = "inline-block";
+
+        if (!stripAll) {
+          const newExif = piexif.load(outputDataUrl);
+          exifOutput.value = JSON.stringify(newExif, null, 2);
+        } else {
+          exifOutput.value = strings[currentLang].allExifRemoved;
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Error editing EXIF: " + err);
+      }
+    }
+
+    // --- Helpers: decimal <-> DMS ---
+
+    function decimalToDmsRational(dec) {
+      const abs = Math.abs(dec);
+      const deg = Math.floor(abs);
+      const minFloat = (abs - deg) * 60;
+      const min = Math.floor(minFloat);
+      const secFloat = (minFloat - min) * 60;
+      const secDen = 10000;
+      const secNum = Math.round(secFloat * secDen);
+
+      return [
+        [deg, 1],
+        [min, 1],
+        [secNum, secDen]
+      ];
+    }
+
+    function dmsRationalToDecimal(dmsArray, ref) {
+      if (!Array.isArray(dmsArray) || dmsArray.length !== 3) return null;
+      const [d, m, s] = dmsArray;
+      const deg = d[0] / d[1];
+      const min = m[0] / m[1];
+      const sec = s[0] / s[1];
+      let dec = deg + min / 60 + sec / 3600;
+      if (ref === "S" || ref === "W") {
+        dec = -dec;
+      }
+      return dec;
+    }
+
+    // Initialize UI text
+    applyTranslations();
+  </script>
+  <footer style="margin-top:2rem; padding-top:0.75rem; border-top:1px solid #ddd; font-size:0.8rem;">
+    <p data-i18n-key="footerCredits">
+      E. Reyes, 2025. Tool with pedagogical and scientific purposes only. The site does not collect or saves your data.
+    </p>
+    <p data-i18n-key="footerLicense">
+      Licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">
+      Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)</a>.
+    </p>
+  </footer>
+</body>
+</html>
