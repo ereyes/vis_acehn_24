@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototype Aubervilliers</title>
+    <style>
+        /* CSS est inclus ici pour la simplicité du prototype */
+        #map-container {
+            position: relative;
+            /* Utilisez l'ID ou le nom du fichier de votre croquis */
+            width: 1200px; /* Ajustez selon la taille de votre image pour un rendu optimal */
+            height: 600px; /* Ajustez selon la taille de votre image */
+            margin: 20px auto;
+            border: 1px solid #ccc;
+            /* L'image de votre croquis est utilisée comme fond */
+            background-image: url('20251203_210343 - KAHINA OUFELLA(1).jpg');
+            background-size: contain; /* Ajuste l'image pour qu'elle soit visible */
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        .point-interet {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: red;
+            border-radius: 50%;
+            border: 2px solid white;
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            z-index: 10; /* Assurez-vous qu'il est au-dessus de l'image */
+            transition: transform 0.2s;
+        }
+
+        .point-interet:hover {
+            transform: scale(1.2);
+        }
+        
+        /* Positions approximatives basées sur votre croquis */
+        #poi-1 { top: 220px; left: 160px; } /* Proche de A - 3e Secteur */
+        #poi-2 { top: 215px; left: 290px; } /* Le long du canal */
+        #poi-3 { top: 60px; left: 320px; }  /* Proche de A - 3e Secteur */
+        #poi-4 { top: 350px; left: 450px; } /* Proche de E - Lieu Jack Almas */
+        #poi-5 { top: 200px; left: 630px; } /* Proche de B - Star Academy */
+        #poi-6 { top: 600px; left: 660px; } /* Proche de F - Place des Allures */
+        #poi-7 { top: 480px; left: 740px; } /* Proche de C - Jardin Front Populaire */
+        #poi-8 { top: 250px; left: 770px; } /* Proche de D - Stade B.I.O. */
+
+
+        #info-bulle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            padding: 15px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 2px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 20;
+            display: none; /* Caché par défaut */
+            font-family: Arial, sans-serif;
+        }
+
+        #info-bulle h3 {
+            margin-top: 0;
+            border-bottom: 2px solid red;
+            padding-bottom: 5px;
+            color: red;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🗺️ Carte Interactive d'Aubervilliers</h1>
+    
+    <div id="map-container">
+        <button class="point-interet" id="poi-1" data-image-name="PHOTO - Zineb Doukkali.jpg"></button>
+        <button class="point-interet" id="poi-2" data-image-name="arturbanff - Malak Lamallam.jpeg"></button>
+        <button class="point-interet" id="poi-3" data-image-name="Photo - bouzidi fatimazohra.jpg"></button>
+        <button class="point-interet" id="poi-4" data-image-name="bigcatf - Malak Lamallam.jpeg"></button>
+        <button class="point-interet" id="poi-5" data-image-name="Star Academy - Tassadit GAYA.jpg"></button>
+        <button class="point-interet" id="poi-6" data-image-name="nochildf - Malak Lamallam.jpeg"></button>
+        <button class="point-interet" id="poi-7" data-image-name="Jardin Zone de fauche tardive - Ourdia Smail.jpg"></button>
+        <button class="point-interet" id="poi-8" data-image-name="Autre photo.jpg"></button>
+        
+        <div id="info-bulle">
+            <h3 id="info-titre">Informations sur le Point</h3>
+            <p><strong>Fichier :</strong> <span id="info-fichier"></span></p>
+            <p><strong>Latitude :</strong> <span id="info-lat"></span></p>
+            <p><strong>Longitude :</strong> <span id="info-lon"></span></p>
+            <p><strong>Date/Heure :</strong> <span id="info-date"></span></p>
+            <p><em>(Ces données sont simulées ici. Pour les données réelles, il faut un serveur.)</em></p>
+        </div>
+    </div>
+
+    <script>
+        // Le code JavaScript pour l'interactivité
+        const points = document.querySelectorAll('.point-interet');
+        const infoBulle = document.getElementById('info-bulle');
+
+        // Données EXIF SIMULÉES (pour le prototype)
+        // Les vraies données EXIF nécessiteraient une lecture côté serveur (ex: Python/PHP)
+        // ou l'utilisation d'une librairie JS spécifique pour les fichiers chargés par l'utilisateur.
+        const exifDataSimulated = {
+            "PHOTO - Zineb Doukkali.jpg": {
+                titre: "Pont Poutrelles",
+                lat: 48.913,
+                lon: 2.378,
+                date: "2025-10-01 10:00"
+            },
+            "arturbanff - Malak Lamallam.jpeg": {
+                titre: "Art Urbain - Canal",
+                lat: 48.914,
+                lon: 2.381,
+                date: "2025-10-05 14:30"
+            },
+            "Photo - bouzidi fatimazohra.jpg": {
+                titre: "Parc du 3e Secteur",
+                lat: 48.915,
+                lon: 2.382,
+                date: "2025-11-10 11:45"
+            },
+            "bigcatf - Malak Lamallam.jpeg": {
+                titre: "Lieu Jack Almas",
+                lat: 48.911,
+                lon: 2.385,
+                date: "2025-09-20 16:00"
+            },
+            "Star Academy - Tassadit GAYA.jpg": {
+                titre: "Star Academy",
+                lat: 48.914,
+                lon: 2.388,
+                date: "2025-11-25 09:00"
+            },
+            "nochildf - Malak Lamallam.jpeg": {
+                titre: "Place des Allures",
+                lat: 48.910,
+                lon: 2.390,
+                date: "2025-10-15 17:30"
+            },
+            "Jardin Zone de fauche tardive - Ourdia Smail.jpg": {
+                titre: "Jardin de Fauche Tardive",
+                lat: 48.912,
+                lon: 2.392,
+                date: "2025-12-01 13:00"
+            },
+             "Autre photo.jpg": {
+                titre: "Stade B.I.O.",
+                lat: 48.913,
+                lon: 2.394,
+                date: "2025-12-03 15:00"
+            }
+        };
+
+
+        points.forEach(point => {
+            point.addEventListener('click', function() {
+                const fileName = this.getAttribute('data-image-name');
+                const data = exifDataSimulated[fileName];
+
+                if (data) {
+                    // Mise à jour de la bulle d'information
+                    document.getElementById('info-titre').textContent = data.titre;
+                    document.getElementById('info-fichier').textContent = fileName;
+                    document.getElementById('info-lat').textContent = data.lat.toFixed(4);
+                    document.getElementById('info-lon').textContent = data.lon.toFixed(4);
+                    document.getElementById('info-date').textContent = data.date;
+
+                    // Positionnement de la bulle (au centre de la carte pour la simplicité)
+                    // On pourrait la positionner près du point cliqué
+                    infoBulle.style.display = 'block';
+                }
+            });
+        });
+        
+        // Clic n'importe où sur la carte (sauf les points) pour masquer la bulle
+        document.getElementById('map-container').addEventListener('click', function(e) {
+            if (e.target.id === 'map-container' || e.target.tagName === 'IMG') {
+                 infoBulle.style.display = 'none';
+            }
+        });
+
+    </script>
+</body>
+</html>

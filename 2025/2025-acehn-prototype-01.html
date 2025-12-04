@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline EXIF Prototype</title>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <style>
+        :root {
+            --primary: #333;
+            --secondary: #aaa;
+            --bg-overlay: rgba(255, 255, 255, 0.85);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+            height: 100%;
+            overflow: hidden;
+            transition: background 0.5s ease;
+            background-size: cover;
+            background-position: center;
+            background-color: #f4f4f4;
+        }
+
+        /* Overlay pour que le texte reste lisible sur l'image de fond */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-overlay);
+            z-index: 0;
+        }
+
+        /* En-tête */
+        header {
+            position: relative;
+            z-index: 10;
+            padding: 20px;
+            font-size: 1.5rem;
+            color: var(--primary);
+            font-weight: 300;
+        }
+
+        /* Zone de Glisser-Déposer */
+        #drop-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px dashed #ccc;
+            padding: 40px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 20;
+            background: rgba(255,255,255,0.9);
+            transition: all 0.3s;
+        }
+        #drop-zone:hover, #drop-zone.dragover {
+            border-color: var(--primary);
+            background: #fff;
+        }
+        #drop-zone.hidden {
+            display: none;
+        }
+
+        /* Conteneur de la Timeline */
+        .timeline-container {
+            position: relative;
+            z-index: 10;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .timeline-container.visible {
+            opacity: 1;
+        }
+
+        /* La ligne horizontale */
+        .timeline-line {
+            position: absolute;
+            top: 50%;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: var(--secondary);
+            z-index: 1;
+        }
+
+        /* Les points (Nodes) */
+        .nodes-wrapper {
+            display: flex;
+            justify-content: space-between; /* Distribue les points uniformément */
+            width: 80%;
+            position: relative;
+            z-index: 2;
+        }
+
+        .node {
+            width: 16px;
+            height: 16px;
+            background-color: #fff;
+            border: 2px solid var(--secondary);
+            border-radius: 50%;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .node:hover {
+            transform: scale(1.2);
+        }
+
+        .node.active {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            transform: scale(1.3);
+        }
+
+        /* La Carte (Pop-up) - Style Sketch */
+        .card {
+            position: absolute;
+            bottom: 35px; /* Au-dessus du point */
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            width: 220px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        /* Triangle sous la carte */
+        .card::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%) rotate(45deg);
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-right: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .node.active .card {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+            pointer-events: auto;
+        }
+
+        .card-img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border: 1px solid #eee;
+            background: #eee;
+        }
+
+        .card-info {
+            font-size: 0.85rem;
+            color: #555;
+            line-height: 1.4;
+        }
+        
+        .card-date {
+            font-weight: bold;
+            color: #000;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="overlay"></div>
+
+    <header>Timeline</header>
+
+    <div id="drop-zone">
+        <h3>Glissez vos photos ici</h3>
+        <p>ou cliquez pour sélectionner</p>
+        <input type="file" id="file-input" multiple accept="image/*" style="display:none;">
+    </div>
+
+    <div class="timeline-container" id="timeline-ui">
+        <div class="timeline-line"></div>
+        <div class="nodes-wrapper" id="nodes-container">
+            </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const nodesContainer = document.getElementById('nodes-container');
+        const timelineUI = document.getElementById('timeline-ui');
+        
+        // Gestion du Drag & Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Traitement des fichiers
+        async function handleFiles(files) {
+            if (files.length === 0) return;
+
+            const imagesData = [];
+
+            // Lecture asynchrone des fichiers et EXIF
+            const processingPromises = Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const imgUrl = e.target.result;
+                        
+                        // Utilisation d'EXIF.js
+                        EXIF.getData(file, function() {
+                            const dateTaken = EXIF.getTag(this, "DateTimeOriginal") || "Date inconnue";
+                            // Simulation de localisation si pas de GPS (pour la démo)
+                            const lat = EXIF.getTag(this, "GPSLatitude"); 
+                            
+                            imagesData.push({
+                                url: imgUrl,
+                                date: dateTaken,
+                                name: file.name,
+                                timestamp: dateTaken !== "Date inconnue" ? parseExifDate(dateTaken) : 0
+                            });
+                            resolve();
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+
+            await Promise.all(processingPromises);
+
+            // Trier par date
+            imagesData.sort((a, b) => a.timestamp - b.timestamp);
+
+            renderTimeline(imagesData);
+        }
+
+        // Helper pour convertir date EXIF "2023:10:25 14:00:00" en timestamp
+        function parseExifDate(s) {
+            if(!s) return 0;
+            const b = s.split(/\D/);
+            return new Date(b[0], b[1]-1, b[2], b[3], b[4], b[5]).getTime();
+        }
+
+        // Rendu de l'interface
+        function renderTimeline(data) {
+            dropZone.classList.add('hidden');
+            timelineUI.classList.add('visible');
+            nodesContainer.innerHTML = '';
+
+            data.forEach((item, index) => {
+                const node = document.createElement('div');
+                node.className = 'node';
+                
+                // Création de la carte (Popup)
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <img src="${item.url}" class="card-img" alt="Photo">
+                    <div class="card-info">
+                        <span class="card-date">${formatDisplayDate(item.date)}</span>
+                        <span>${item.name}</span>
+                        <br><span style="font-size:0.7em; color:#999">Lat/Lon: simulé</span>
+                    </div>
+                `;
+
+                node.appendChild(card);
+                nodesContainer.appendChild(node);
+
+                // Interaction
+                node.addEventListener('click', () => {
+                    // Désactiver les autres
+                    document.querySelectorAll('.node').forEach(n => n.classList.remove('active'));
+                    
+                    // Activer celui-ci
+                    node.classList.add('active');
+                    
+                    // Mettre à jour l'image de fond (comme indiqué "Image de fond" sur le croquis)
+                    document.body.style.backgroundImage = `url('${item.url}')`;
+                });
+            });
+            
+            // Activer le premier point par défaut
+            if(nodesContainer.children.length > 0) {
+                nodesContainer.children[0].click();
+            }
+        }
+
+        function formatDisplayDate(exifDate) {
+            if (exifDate === "Date inconnue") return exifDate;
+            // Format simple pour l'affichage
+            return exifDate.split(' ')[0].replace(/:/g, '/');
+        }
+    </script>
+</body>
+</html>

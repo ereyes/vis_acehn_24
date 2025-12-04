@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline EXIF Dynamique</title>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <style>
+        :root {
+            --primary: #333;
+            --secondary: #aaa;
+            --bg-overlay: rgba(255, 255, 255, 0.85);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+            height: 100%;
+            overflow: hidden;
+            transition: background 0.5s ease;
+            background-size: cover;
+            background-position: center;
+            background-color: #f4f4f4;
+        }
+
+        /* Overlay pour que le texte reste lisible sur l'image de fond */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-overlay);
+            z-index: 0;
+        }
+
+        /* En-tête */
+        header {
+            position: relative;
+            z-index: 10;
+            padding: 20px;
+            font-size: 1.5rem;
+            color: var(--primary);
+            font-weight: 300;
+        }
+
+        /* Bouton d'ajout */
+        #add-images-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            padding: 8px 15px;
+            background: #fff;
+            color: var(--primary);
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #add-images-btn:hover {
+            background: #eee;
+        }
+        
+
+        /* Zone de Glisser-Déposer */
+        #drop-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px dashed #ccc;
+            padding: 40px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 20;
+            background: rgba(255,255,255,0.9);
+            transition: all 0.3s;
+            /* Flex pour centrer le contenu */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        #drop-zone:hover, #drop-zone.dragover {
+            border-color: var(--primary);
+            background: #fff;
+        }
+        #drop-zone.hidden {
+            display: none;
+        }
+
+        /* Conteneur de la Timeline */
+        .timeline-container {
+            position: relative;
+            z-index: 10;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .timeline-container.visible {
+            opacity: 1;
+        }
+
+        /* La ligne horizontale */
+        .timeline-line {
+            position: absolute;
+            top: 50%;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: var(--secondary);
+            z-index: 1;
+        }
+
+        /* Les points (Nodes) */
+        .nodes-wrapper {
+            display: flex;
+            justify-content: space-between;
+            width: 80%;
+            position: relative;
+            z-index: 2;
+        }
+
+        .node {
+            width: 16px;
+            height: 16px;
+            background-color: #fff;
+            border: 2px solid var(--secondary);
+            border-radius: 50%;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s;
+            flex-shrink: 0; /* Important pour garder la taille */
+        }
+
+        .node:hover {
+            transform: scale(1.2);
+        }
+
+        .node.active {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            transform: scale(1.3);
+        }
+
+        /* La Carte (Pop-up) - Style Sketch */
+        .card {
+            position: absolute;
+            bottom: 35px;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            width: 220px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        /* Triangle sous la carte (pour le style croquis) */
+        .card::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%) rotate(45deg);
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-right: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .node.active .card {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+            pointer-events: auto;
+        }
+
+        .card-img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border: 1px solid #eee;
+            background: #eee;
+        }
+
+        .card-info {
+            font-size: 0.85rem;
+            color: #555;
+            line-height: 1.4;
+        }
+        
+        .card-date {
+            font-weight: bold;
+            color: #000;
+            display: block;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="overlay"></div>
+
+    <header>Timeline</header>
+    
+    <button id="add-images-btn" style="display: none;">
+        ➕ Ajouter des images
+    </button>
+
+    <div id="drop-zone">
+        <h3>Glissez vos photos ici</h3>
+        <p>ou cliquez pour sélectionner</p>
+        <input type="file" id="file-input" multiple accept="image/*" style="display:none;">
+    </div>
+
+    <div class="timeline-container" id="timeline-ui">
+        <div class="timeline-line"></div>
+        <div class="nodes-wrapper" id="nodes-container">
+            </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const nodesContainer = document.getElementById('nodes-container');
+        const timelineUI = document.getElementById('timeline-ui');
+        const addImagesBtn = document.getElementById('add-images-btn');
+
+        let allImagesData = []; // Stocke toutes les données d'images (EXIF)
+
+        // --- Gestion des événements de la zone d'upload ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            // Réinitialiser le champ pour pouvoir re-sélectionner les mêmes fichiers si nécessaire
+            e.target.value = null; 
+        });
+
+        addImagesBtn.addEventListener('click', () => {
+            dropZone.classList.remove('hidden');
+            addImagesBtn.style.display = 'none'; // Masquer le bouton pendant l'ajout
+        });
+
+        // --- Fonctions utilitaires ---
+        
+        // Helper pour convertir date EXIF "YYYY:MM:DD HH:MM:SS" en timestamp
+        function parseExifDate(s) {
+            if(!s) return 0;
+            // Remplace les ':' de la date par '-' pour que Date.parse fonctionne mieux
+            const isoString = s.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+            return new Date(isoString).getTime();
+        }
+
+        function formatDisplayDate(exifDate) {
+            if (exifDate === "Date inconnue") return exifDate;
+            // Format JJ/MM/AAAA (en ignorant l'heure pour la pop-up)
+            const parts = exifDate.split(' ')[0].split(':');
+            if (parts.length === 3) {
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            }
+            return exifDate;
+        }
+
+        // --- Fonctions principales ---
+
+        // Traitement des fichiers (Lecture EXIF et ajout aux données)
+        async function handleFiles(files) {
+            if (files.length === 0) return;
+
+            const newImages = [];
+
+            // Lecture asynchrone des fichiers et EXIF
+            const processingPromises = Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const imgUrl = e.target.result;
+                        
+                        EXIF.getData(file, function() {
+                            const dateTaken = EXIF.getTag(this, "DateTimeOriginal") || "Date inconnue";
+                            const fileDate = parseExifDate(dateTaken);
+                            
+                            newImages.push({
+                                url: imgUrl,
+                                date: dateTaken,
+                                name: file.name,
+                                timestamp: fileDate,
+                                // ID unique pour la gestion des nœuds
+                                id: fileDate + '_' + Math.random().toString(16).slice(2) 
+                            });
+                            resolve();
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+
+            await Promise.all(processingPromises);
+
+            // 1. Ajouter les nouvelles images aux données existantes
+            allImagesData = allImagesData.concat(newImages);
+
+            // 2. Trier l'ensemble du tableau par date
+            allImagesData.sort((a, b) => a.timestamp - b.timestamp);
+
+            // 3. Rendre la ligne de temps mise à jour
+            renderTimeline(allImagesData);
+        }
+
+        // Rendu de l'interface (Timeline)
+        function renderTimeline(data) {
+            // Masquer la zone de drop et afficher la Timeline
+            dropZone.classList.add('hidden');
+            timelineUI.classList.add('visible');
+            
+            // Vider le conteneur avant de reconstruire
+            nodesContainer.innerHTML = ''; 
+
+            data.forEach((item, index) => {
+                const node = document.createElement('div');
+                node.className = 'node';
+                node.dataset.index = index; // Pour identification
+
+                // Création de la carte (Popup)
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <img src="${item.url}" class="card-img" alt="Photo">
+                    <div class="card-info">
+                        <span class="card-date">${formatDisplayDate(item.date)}</span>
+                        <span>${item.name}</span>
+                    </div>
+                `;
+
+                node.appendChild(card);
+                nodesContainer.appendChild(node);
+
+                // Interaction
+                node.addEventListener('click', () => {
+                    // Désactiver les autres
+                    document.querySelectorAll('.node').forEach(n => n.classList.remove('active'));
+                    
+                    // Activer celui-ci
+                    node.classList.add('active');
+                    
+                    // Mettre à jour l'image de fond
+                    document.body.style.backgroundImage = `url('${item.url}')`;
+                });
+            });
+            
+            // Afficher le bouton pour ajouter d'autres images
+            addImagesBtn.style.display = 'block';
+
+            // Activer le dernier point par défaut (le plus récent)
+            if(nodesContainer.children.length > 0) {
+                nodesContainer.children[nodesContainer.children.length - 1].click();
+            }
+        }
+    </script>
+</body>
+</html>
