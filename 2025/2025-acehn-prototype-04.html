@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Croquis interactif — photos + EXIF</title>
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --panel: #11131a;
+      --panel2: #0f1117;
+      --text: #e8e9ee;
+      --muted: #a8aab6;
+      --border: rgba(255,255,255,.12);
+      --accent: #ff3b30;
+      --accent2: #62d0ff;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --r: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 20% 0%, rgba(98,208,255,.10), transparent 60%),
+                  radial-gradient(900px 500px at 80% 20%, rgba(255,59,48,.10), transparent 65%),
+                  var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 18px 22px;
+      display: flex;
+      gap: 14px;
+      align-items: baseline;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,17,23,.6);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 {
+      font-size: 16px;
+      margin: 0;
+      letter-spacing: .2px;
+    }
+    header .sub {
+      color: var(--muted);
+      font-size: 13px;
+      margin-left: 10px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 14px;
+      padding: 14px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; }
+      header { position: static; }
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .mapWrap {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      background: var(--panel2);
+    }
+    #sketch {
+      width: 100%;
+      height: auto;
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .marker {
+      position: absolute;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: var(--accent);
+      border: 2px solid rgba(255,255,255,.9);
+      box-shadow: 0 10px 20px rgba(0,0,0,.35);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      padding: 0;
+    }
+    .marker span {
+      font-size: 12px;
+      font-weight: 800;
+      color: #120606;
+      text-shadow: 0 1px 0 rgba(255,255,255,.25);
+    }
+    .marker:hover { filter: brightness(1.05) saturate(1.1); }
+    .marker:focus-visible {
+      outline: 3px solid rgba(98,208,255,.75);
+      outline-offset: 2px;
+    }
+    .marker.active {
+      background: #ff6a00;
+      transform: translate(-50%, -50%) scale(1.06);
+    }
+    .marker.unassigned {
+      background: rgba(255,59,48,.18);
+      border: 2px dashed rgba(255,255,255,.35);
+      box-shadow: none;
+    }
+    .marker.unassigned span {
+      color: rgba(255,255,255,.80);
+      text-shadow: none;
+    }
+
+    .mapFooter {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(17,19,26,.5);
+    }
+    .hint {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      border: 1px solid rgba(255,255,255,.7);
+    }
+
+    .side {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .dropZone {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 10px;
+      background: rgba(17,19,26,.45);
+    }
+    .dropZone.drag {
+      outline: 2px dashed rgba(98,208,255,.7);
+      outline-offset: -8px;
+      background: rgba(98,208,255,.08);
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    button.primary {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 650;
+      letter-spacing: .2px;
+    }
+    button.primary:hover { background: rgba(255,255,255,.09); }
+    button.primary:active { transform: translateY(1px); }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .small code {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.10);
+      padding: 1px 6px;
+      border-radius: 8px;
+      color: rgba(255,255,255,.9);
+    }
+
+    .details {
+      padding: 14px;
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .title {
+      margin: 0 0 10px 0;
+      font-size: 15px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .title .meta {
+      font-size: 12px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .preview {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.20);
+      overflow: hidden;
+    }
+    .preview img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .status {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.03);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .status.error {
+      border-color: rgba(255,59,48,.35);
+      background: rgba(255,59,48,.08);
+      color: rgba(255,255,255,.9);
+    }
+    .status.ok {
+      border-color: rgba(98,208,255,.35);
+      background: rgba(98,208,255,.08);
+      color: rgba(255,255,255,.92);
+    }
+
+    dl.exif {
+      margin: 12px 0 0 0;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    dl.exif .pair {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      padding: 9px 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.03);
+      border-radius: 12px;
+    }
+    dl.exif dt {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0;
+      align-self: start;
+    }
+    dl.exif dd {
+      margin: 0;
+      font-size: 13px;
+      color: rgba(255,255,255,.95);
+      overflow-wrap: anywhere;
+    }
+
+    details.raw {
+      margin-top: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 12px;
+      background: rgba(255,255,255,.02);
+      overflow: hidden;
+    }
+    details.raw summary {
+      padding: 10px 12px;
+      cursor: pointer;
+      color: rgba(255,255,255,.95);
+      font-weight: 650;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+    }
+    details.raw pre {
+      margin: 0;
+      padding: 12px;
+      max-height: 280px;
+      overflow: auto;
+      font-size: 12px;
+      color: rgba(255,255,255,.85);
+    }
+    a {
+      color: var(--accent2);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Croquis interactif — points cliquables → photo + EXIF</h1>
+      <div class="sub">Astuce : si l’EXIF ne se charge pas, importez vos photos ci‑dessous (ou servez ce dossier via un petit serveur HTTP).</div>
+    </div>
+    <div class="pill"><span class="dot"></span> Cliquez sur un point rouge</div>
+  </header>
+
+  <main class="app">
+    <section class="card">
+      <div class="mapWrap" id="mapStage" aria-label="Croquis avec points cliquables">
+        <img id="sketch" src="croquis.jpg" alt="Croquis (plan) avec points rouges" />
+        <!-- markers injected here -->
+      </div>
+      <div class="mapFooter">
+        <div class="hint">
+          Les positions des points ont été reprises automatiquement depuis votre image (en %).
+          Vous pouvez modifier l’association <code>POINTS</code> dans le script.
+        </div>
+        <div class="pill" id="loadedBadge" title="Nombre de fichiers importés et reconnus">
+          0 fichier importé
+        </div>
+      </div>
+    </section>
+
+    <aside class="card side">
+      <div class="dropZone" id="dropZone">
+        <div class="row">
+          <div>
+            <div style="font-weight:700">Importer des photos (optionnel)</div>
+            <div class="small">Ça permet de lire l’EXIF même si vous ouvrez ce fichier en <code>file://</code>. Les noms doivent correspondre (exactement) à ceux listés.</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input id="filePicker" type="file" accept="image/*" multiple hidden />
+            <button class="primary" id="pickBtn">Choisir des fichiers…</button>
+          </div>
+        </div>
+        <div class="small">Vous pouvez aussi glisser‑déposer ici.</div>
+      </div>
+
+      <div class="details" id="details">
+        <p class="small" style="margin-top:0">
+          Sélectionnez un point rouge pour afficher la photo associée et ses métadonnées EXIF.
+        </p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- EXIF parser (exifr) -->
+  <script src="https://unpkg.com/exifr/dist/lite.umd.js"></script>
+
+  <script>
+  // =========================
+  // Réglages
+  // =========================
+  const PHOTO_BASE = ""; // mettez "./" si les photos sont à côté du HTML
+
+  // Points (x,y sont des pourcentages par rapport à l'image du croquis)
+  const POINTS = [
+  {
+    "id": 1,
+    "x": 13.4262,
+    "y": 19.8578,
+    "title": "PHOTO - Zineb Doukkali",
+    "file": "PHOTO - Zineb Doukkali.jpg"
+  },
+  {
+    "id": 2,
+    "x": 74.2366,
+    "y": 26.428,
+    "title": "arturbanff - Malak Lamallam",
+    "file": "arturbanff - Malak Lamallam.jpeg"
+  },
+  {
+    "id": 3,
+    "x": 65.5558,
+    "y": 26.4688,
+    "title": "Photo - bouzidi fatimazohra",
+    "file": "Photo - bouzidi fatimazohra.jpg"
+  },
+  {
+    "id": 4,
+    "x": 8.4207,
+    "y": 28.6997,
+    "title": "bigcatf - Malak Lamallam",
+    "file": "bigcatf - Malak Lamallam.jpeg"
+  },
+  {
+    "id": 5,
+    "x": 70.2334,
+    "y": 38.8199,
+    "title": "Star Academy - Tassadit GAYA",
+    "file": "Star Academy - Tassadit GAYA.jpg"
+  },
+  {
+    "id": 6,
+    "x": 15.5176,
+    "y": 41.5561,
+    "title": "nochildf - Malak Lamallam",
+    "file": "nochildf - Malak Lamallam.jpeg"
+  },
+  {
+    "id": 7,
+    "x": 47.6254,
+    "y": 54.8421,
+    "title": "Jardin Zone de fauche tardive - Ourdia Smail",
+    "file": "Jardin Zone de fauche tardive - Ourdia Smail.jpg"
+  },
+  {
+    "id": 8,
+    "x": 29.7606,
+    "y": 67.3283,
+    "title": "Point 8 (à renseigner)",
+    "file": null
+  },
+  {
+    "id": 9,
+    "x": 33.7408,
+    "y": 70.3727,
+    "title": "Point 9 (à renseigner)",
+    "file": null
+  },
+  {
+    "id": 10,
+    "x": 52.4228,
+    "y": 78.3253,
+    "title": "Point 10 (à renseigner)",
+    "file": null
+  },
+  {
+    "id": 11,
+    "x": 43.9713,
+    "y": 82.8606,
+    "title": "Point 11 (à renseigner)",
+    "file": null
+  }
+];
+
+  // =========================
+  // UI helpers
+  // =========================
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const mapStage = $("#mapStage");
+  const details = $("#details");
+  const loadedBadge = $("#loadedBadge");
+  const dropZone = $("#dropZone");
+  const filePicker = $("#filePicker");
+  const pickBtn = $("#pickBtn");
+
+  const fileStore = new Map(); // filename -> File
+  let activePointId = null;
+  let activeObjectUrl = null;
+
+  function setLoadedBadge() {
+    const n = fileStore.size;
+    loadedBadge.textContent = `${n} fichier${n>1 ? "s" : ""} importé${n>1 ? "s" : ""}`;
+  }
+
+  function humanBytes(bytes) {
+    if (!Number.isFinite(bytes)) return "";
+    const units = ["B","KB","MB","GB"];
+    let i = 0;
+    let b = bytes;
+    while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+    const v = (i === 0) ? String(Math.round(b)) : b.toFixed(b < 10 ? 2 : 1);
+    return `${v} ${units[i]}`;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function fmtExposure(v) {
+    if (v == null) return null;
+    if (typeof v === "string") return v;
+    if (typeof v === "number") {
+      if (v === 0) return "0 s";
+      if (v >= 1) return `${v.toFixed(2).replace(/\.00$/,"")} s`;
+      const inv = Math.round(1 / v);
+      return `1/${inv} s`;
+    }
+    return String(v);
+  }
+
+  function fmtFNumber(v) {
+    if (v == null) return null;
+    if (typeof v === "number") return `ƒ/${v.toFixed(1).replace(/\.0$/,"")}`;
+    return String(v);
+  }
+
+  function fmtFocal(v) {
+    if (v == null) return null;
+    if (typeof v === "number") return `${v.toFixed(1).replace(/\.0$/,"")} mm`;
+    return String(v);
+  }
+
+  function fmtIso(v) {
+    if (v == null) return null;
+    if (typeof v === "number") return `ISO ${v}`;
+    return String(v);
+  }
+
+  function fmtDate(v) {
+    if (!v) return null;
+    try {
+      // v peut être un Date, une string, ou un nombre
+      const d = (v instanceof Date) ? v : new Date(v);
+      if (Number.isNaN(d.valueOf())) return String(v);
+      return d.toLocaleString();
+    } catch {
+      return String(v);
+    }
+  }
+
+  function gpsLink(lat, lon) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const q = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+    return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(lat)}&mlon=${encodeURIComponent(lon)}#map=18/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`;
+  }
+
+  function renderStatus(msg, kind="") {
+    return `<div class="status ${kind}">${msg}</div>`;
+  }
+
+  function renderExif(exif, extra={}) {
+    const fields = [
+      ["Titre", extra.title],
+      ["Fichier", extra.fileName],
+      ["Taille", extra.size],
+      ["Dimensions", extra.dimensions],
+      ["Date/heure", fmtDate(exif?.DateTimeOriginal ?? exif?.CreateDate ?? exif?.ModifyDate)],
+      ["Marque", exif?.Make],
+      ["Modèle", exif?.Model],
+      ["Objectif", exif?.LensModel],
+      ["Focale", fmtFocal(exif?.FocalLength)],
+      ["Ouverture", fmtFNumber(exif?.FNumber)],
+      ["Vitesse", fmtExposure(exif?.ExposureTime)],
+      ["Sensibilité", fmtIso(exif?.ISO)],
+      ["Flash", exif?.Flash],
+      ["Orientation", exif?.Orientation],
+      ["Logiciel", exif?.Software],
+    ];
+
+    const lat = exif?.latitude;
+    const lon = exif?.longitude;
+    const alt = exif?.altitude;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      fields.push(["GPS", `${lat.toFixed(6)}, ${lon.toFixed(6)}`]);
+      if (Number.isFinite(alt)) fields.push(["Altitude", `${alt} m`]);
+      const link = gpsLink(lat, lon);
+      if (link) fields.push(["Carte", `<a href="${link}" target="_blank" rel="noopener">Ouvrir dans OpenStreetMap</a>`]);
+    }
+
+    const pairs = fields
+      .filter(([_, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => {
+        const val = (typeof v === "string" && v.includes("<a ")) ? v : escapeHtml(v);
+        return `<div class="pair"><dt>${escapeHtml(k)}</dt><dd>${val}</dd></div>`;
+      })
+      .join("");
+
+    const raw = escapeHtml(JSON.stringify(exif ?? {}, null, 2));
+
+    return `
+      <dl class="exif">${pairs || "<div class='small'>Aucune donnée EXIF détectée.</div>"}</dl>
+      <details class="raw">
+        <summary>EXIF brut (JSON)</summary>
+        <pre>${raw}</pre>
+      </details>
+    `;
+  }
+
+  // =========================
+  // Chargement fichiers (drag & drop / picker)
+  // =========================
+  function ingestFiles(fileList) {
+    const files = Array.from(fileList || []);
+    for (const f of files) {
+      if (!f || !f.name) continue;
+      fileStore.set(f.name, f);
+    }
+    setLoadedBadge();
+  }
+
+  pickBtn.addEventListener("click", () => filePicker.click());
+  filePicker.addEventListener("change", (e) => ingestFiles(e.target.files));
+
+  // Drag & drop
+  ;["dragenter","dragover"].forEach(evt => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add("drag");
+    });
+  });
+  ;["dragleave","drop"].forEach(evt => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("drag");
+    });
+  });
+  dropZone.addEventListener("drop", (e) => {
+    ingestFiles(e.dataTransfer.files);
+  });
+
+  // =========================
+  // Points / markers
+  // =========================
+  function createMarkers() {
+    for (const p of POINTS) {
+      const btn = document.createElement("button");
+      btn.className = "marker" + (p.file ? "" : " unassigned");
+      btn.style.left = `${p.x}%`;
+      btn.style.top = `${p.y}%`;
+      btn.type = "button";
+      btn.dataset.pointId = String(p.id);
+      btn.title = p.title + (p.file ? `\n${p.file}` : "\n(Aucun fichier associé — cliquez pour voir le détail)");
+      btn.setAttribute("aria-label", `Point ${p.id} : ${p.title}`);
+
+      const span = document.createElement("span");
+      span.textContent = String(p.id);
+      btn.appendChild(span);
+
+      btn.addEventListener("click", () => selectPoint(p.id));
+      mapStage.appendChild(btn);
+    }
+  }
+
+  function setActiveMarker(pointId) {
+    for (const el of mapStage.querySelectorAll(".marker")) {
+      const isActive = el.dataset.pointId === String(pointId);
+      el.classList.toggle("active", isActive);
+    }
+  }
+
+  async function resolvePhotoSource(point) {
+    if (!point.file) return null;
+
+    // 1) Si le fichier a été importé, on l'utilise (pas de fetch nécessaire).
+    if (fileStore.has(point.file)) {
+      const file = fileStore.get(point.file);
+      return { kind: "file", file };
+    }
+
+    // 2) Sinon on tente par URL relative (nécessite souvent un serveur HTTP).
+    const url = encodeURI(PHOTO_BASE + point.file);
+    return { kind: "url", url };
+  }
+
+  function cleanupObjectUrl() {
+    if (activeObjectUrl) {
+      URL.revokeObjectURL(activeObjectUrl);
+      activeObjectUrl = null;
+    }
+  }
+
+  async function selectPoint(pointId) {
+    const point = POINTS.find(p => p.id === pointId);
+    if (!point) return;
+    activePointId = pointId;
+    setActiveMarker(pointId);
+
+    cleanupObjectUrl();
+
+    const srcInfo = await resolvePhotoSource(point);
+    const fileName = point.file || "—";
+
+    details.innerHTML = `
+      <h2 class="title">
+        <span>Point ${point.id} — ${escapeHtml(point.title)}</span>
+        <span class="meta">${point.file ? escapeHtml(point.file) : "Aucun fichier associé"}</span>
+      </h2>
+      <div class="preview"><img id="previewImg" alt="Aperçu de la photo sélectionnée" /></div>
+      ${
+        point.file
+          ? renderStatus("Chargement de la photo et lecture des EXIF…", "")
+          : renderStatus("Ce point n’a pas encore de fichier associé. Ajoutez-en un dans POINTS (script).", "error")
+      }
+      <div id="exifZone"></div>
+    `;
+
+    const previewImg = $("#previewImg", details);
+    const exifZone = $("#exifZone", details);
+
+    if (!srcInfo) {
+      exifZone.innerHTML = "";
+      return;
+    }
+
+    let exif = null;
+    let size = "";
+    let dimensions = "";
+
+    try {
+      let blob = null;
+
+      if (srcInfo.kind === "file") {
+        blob = srcInfo.file;
+        size = humanBytes(srcInfo.file.size);
+        activeObjectUrl = URL.createObjectURL(srcInfo.file);
+        previewImg.src = activeObjectUrl;
+      } else {
+        // URL
+        previewImg.src = srcInfo.url;
+        const res = await fetch(srcInfo.url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        blob = await res.blob();
+        size = humanBytes(blob.size);
+      }
+
+      // Attendre que l'image soit décodée pour récupérer ses dimensions
+      await previewImg.decode().catch(() => {});
+      if (previewImg.naturalWidth && previewImg.naturalHeight) {
+        dimensions = `${previewImg.naturalWidth}×${previewImg.naturalHeight} px`;
+      }
+
+      // Lire EXIF
+      if (!window.exifr) {
+        throw new Error("La librairie exifr n'a pas pu être chargée.");
+      }
+
+      exif = await window.exifr.parse(blob, {
+        tiff: true,
+        exif: true,
+        gps: true,
+        ifd0: true,
+        // Lite build : pas tout, mais largement suffisant pour Make/Model/Date/GPS/Exposure…
+      });
+
+      exifZone.innerHTML = renderStatus("EXIF lu ✓", "ok") + renderExif(exif, {
+        title: point.title,
+        fileName,
+        size,
+        dimensions
+      });
+    } catch (err) {
+      const msg = `
+        <div class="status error">
+          <div style="font-weight:700; margin-bottom:6px;">Impossible de lire la photo / l’EXIF.</div>
+          <div class="small">
+            • Si vous avez ouvert le fichier en <code>file://</code>, le navigateur bloque souvent <code>fetch()</code> → importez la photo (bouton ci‑dessus) ou servez ce dossier via HTTP (ex: <code>python -m http.server</code>).<br/>
+            • Erreur : <code>${escapeHtml(err?.message || String(err))}</code>
+          </div>
+        </div>
+      `;
+      exifZone.innerHTML = msg;
+    }
+  }
+
+  // =========================
+  // Init
+  // =========================
+  createMarkers();
+  setLoadedBadge();
+
+  // Sélectionner automatiquement le 1er point au chargement (optionnel)
+  selectPoint(1);
+  </script>
+</body>
+</html>
